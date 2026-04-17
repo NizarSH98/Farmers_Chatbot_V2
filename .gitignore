@@ -1,0 +1,29 @@
+# Environment variables / secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Temp files
+temp_dir/
+*.tmp
+*.wav
+*.mp3
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Models (too large for git)
+*.pt
+*.bin
+*.onnx
