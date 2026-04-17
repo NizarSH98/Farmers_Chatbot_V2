@@ -17,35 +17,53 @@ from dotenv import load_dotenv
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# Optional: edge-tts provides free neural text-to-speech via Microsoft's API.
+# Gracefully degrade if unavailable (e.g. restricted environments).
 try:
     import edge_tts
     EDGE_TTS_AVAILABLE = True
 except ImportError:
     EDGE_TTS_AVAILABLE = False
 
+# Optional: audio_recorder_streamlit enables browser mic input.
 try:
     from audio_recorder_streamlit import audio_recorder
     AUDIO_RECORDER_AVAILABLE = True
 except ImportError:
     AUDIO_RECORDER_AVAILABLE = False
 
+# Load .env for API keys (OPENROUTER_API_KEY, etc.). Not used in production
+# on Streamlit Cloud where secrets are injected as env vars.
 load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-PDF_PATH = "Agricultural Guide for Lebanon.pdf"
+PDF_PATH = "Agricultural Guide for Lebanon.pdf"  # Knowledge base PDF
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-MAX_QUERIES_PER_SESSION = 25
-MAX_QUERIES_PER_DAY_GLOBAL = 300
-COOLDOWN_SECONDS = 3
+# Rate-limiting thresholds to prevent API cost overruns
+MAX_QUERIES_PER_SESSION = 25      # Per browser session (resets on page refresh)
+MAX_QUERIES_PER_DAY_GLOBAL = 300  # Shared across all users (server-side counter)
+COOLDOWN_SECONDS = 3              # Minimum seconds between consecutive queries
 
+# Only cost-effective models are exposed to avoid burning credits
 MODEL_OPTIONS = {
     "GPT-3.5 Turbo": "openai/gpt-3.5-turbo",
     "Claude 3 Haiku": "anthropic/claude-3-haiku-20240307",
     "Llama 3 70B": "meta-llama/llama-3-70b-instruct",
 }
+
+# Suggested prompts shown as clickable chips when the chat is empty.
+# These guide first-time users and demonstrate the bot's capabilities.
+SUGGESTED_PROMPTS = [
+    "🫒 What olive varieties grow best in Lebanon?",
+    "🍇 When should I harvest grapes in the Bekaa Valley?",
+    "💧 What are the best irrigation methods for Lebanese farms?",
+    "🌾 What crops are suitable for South Lebanon?",
+    "🐛 How do I deal with citrus pests organically?",
+    "🍎 What apple varieties are recommended for Mount Lebanon?",
+]
 
 # ---------------------------------------------------------------------------
 # Page config & custom CSS
@@ -110,6 +128,91 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     color: #64748b;
     margin: 0.2rem 0 0;
 }
+
+/* Welcome card shown when chat is empty */
+.welcome-card {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #d1fae5 100%);
+    border: 1px solid #bbf7d0;
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    margin: 1.5rem auto;
+    max-width: 640px;
+    text-align: center;
+}
+.welcome-card h2 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #15803d;
+    margin: 0 0 0.5rem;
+}
+.welcome-card p {
+    font-size: 0.88rem;
+    color: #475569;
+    margin: 0 0 0.3rem;
+    line-height: 1.5;
+}
+
+/* Capability pills shown inside welcome card */
+.capabilities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 1rem;
+}
+.capability-pill {
+    background: white;
+    border: 1px solid #d1fae5;
+    border-radius: 20px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.78rem;
+    color: #15803d;
+    font-weight: 500;
+}
+
+/* Suggestion prompt chips — clickable quick-start questions */
+.suggestion-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin: 1rem auto 0.5rem;
+    max-width: 700px;
+}
+
+/* Feedback (thumbs) inline on assistant messages */
+.feedback-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    align-items: center;
+}
+.feedback-row button {
+    background: none;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: #64748b;
+    transition: all 0.15s;
+}
+.feedback-row button:hover {
+    background: #f0fdf4;
+    border-color: #16a34a;
+    color: #16a34a;
+}
+
+/* Divider between welcome and suggestions */
+.section-label {
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 1.2rem 0 0.5rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -118,6 +221,9 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 # Language detection
 # ---------------------------------------------------------------------------
 def detect_language(text):
+    """Detect whether input text is primarily Arabic or English.
+    Uses Unicode range counting — if >30% of characters are Arabic,
+    the text is treated as Arabic for prompt/response language matching."""
     arabic_chars = len(re.findall(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]', text))
     english_chars = len(re.findall(r'[a-zA-Z]', text))
     total = arabic_chars + english_chars
@@ -130,6 +236,8 @@ def detect_language(text):
 # PDF extraction with structure awareness
 # ---------------------------------------------------------------------------
 def extract_text_from_pdf(pdf_path):
+    """Read every page of the PDF and return a list of {page, text} dicts.
+    Skips pages with no extractable text (e.g. image-only pages)."""
     with open(pdf_path, "rb") as f:
         reader = PyPDF2.PdfReader(f)
         pages = []
@@ -203,7 +311,9 @@ def _build_search_index(pdf_path):
 
 
 def get_relevant_chunks(query, chunks, vectorizer, vectors, top_k=5):
-    """Retrieve top-k chunks, return with similarity scores."""
+    """Retrieve the top-k most relevant chunks for a query.
+    Uses both the original query and an expanded version (singular/plural)
+    to improve recall. De-duplicates near-identical passages."""
     query_vec = vectorizer.transform([query])
     scores = cosine_similarity(query_vec, vectors).flatten()
 
@@ -253,6 +363,9 @@ def _expand_query(query):
 # LLM query with grounded prompt
 # ---------------------------------------------------------------------------
 def query_openrouter(query, context_chunks, model, temperature=0.4, max_tokens=600):
+    """Send the query + retrieved context to an LLM via OpenRouter.
+    The system prompt enforces source-only answers with [Source N] citations.
+    Returns (answer_text, context_chunks) tuple."""
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         return "Error: OpenRouter API key not configured.", []
@@ -345,6 +458,11 @@ def fallback_answer(query, context_chunks):
 # Rate limiting
 # ---------------------------------------------------------------------------
 def check_rate_limit():
+    """Three-layer rate limiter:
+    1. Per-session cap (resets on page refresh)
+    2. Global daily cap (shared counter in temp file)
+    3. Cooldown between consecutive queries
+    Returns (allowed: bool, error_message: str | None)."""
     import time
     from datetime import date
 
@@ -390,6 +508,8 @@ def check_rate_limit():
 # Edge TTS
 # ---------------------------------------------------------------------------
 def text_to_speech_edge(text, language="english"):
+    """Generate speech audio from text using Microsoft's free edge-tts.
+    Returns (audio_bytes, error_string). One of them will be None."""
     if not EDGE_TTS_AVAILABLE:
         return None, "edge-tts not available"
     try:
@@ -487,7 +607,7 @@ def main():
 
     chunks, vectorizer, vectors = _build_search_index(PDF_PATH)
 
-    # --- Sidebar (clean) ---
+    # --- Sidebar: settings, session controls, and info ---
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
 
@@ -497,6 +617,13 @@ def main():
         temperature = st.slider("Creativity", 0.0, 1.0, 0.3, 0.1,
                                 help="Lower = more factual, higher = more creative")
         max_tokens = st.slider("Max response length", 200, 800, 500, 50)
+
+        st.markdown("---")
+
+        # New Chat button — clears conversation history so the user can start fresh
+        if st.button("🗑️ New Chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
 
         st.markdown("---")
         if "query_count" not in st.session_state:
@@ -511,11 +638,56 @@ def main():
         else:
             st.caption("🔇 Voice output unavailable (edge-tts)")
 
+        # About section — brief explainer for new users
+        st.markdown("---")
+        with st.expander("ℹ️ About this app"):
+            st.markdown(
+                "This chatbot answers questions about Lebanese agriculture "
+                "using the official *Agricultural Guide for Lebanon* as its "
+                "sole knowledge source. Answers include source citations so "
+                "you can verify every claim.\n\n"
+                "**How it works:** Your question is matched against passages "
+                "from the guide using TF-IDF similarity. The best-matching "
+                "passages are sent to an AI model that generates a grounded, "
+                "cited answer.\n\n"
+                "Built with ❤️ by Nizar Shehayeb"
+            )
+
     # --- Chat history ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Render previous messages
+    # --- Welcome screen (shown only when chat is empty) ---
+    if not st.session_state.messages:
+        st.markdown(
+            '<div class="welcome-card">'
+            '<h2>🌱 Welcome! أهلاً وسهلاً!</h2>'
+            '<p>I\'m your AI farming assistant for Lebanon. Ask me anything about crops, '
+            'irrigation, pest control, soil management, and more — all answers are sourced '
+            'directly from the official Agricultural Guide.</p>'
+            '<div class="capabilities">'
+            '<span class="capability-pill">🌿 Crop recommendations</span>'
+            '<span class="capability-pill">💧 Irrigation advice</span>'
+            '<span class="capability-pill">🐛 Pest management</span>'
+            '<span class="capability-pill">🌍 Regional guidance</span>'
+            '<span class="capability-pill">📅 Seasonal planning</span>'
+            '<span class="capability-pill">🍊 Fruit & vegetable care</span>'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Suggestion chips — clickable starter questions for first-time users
+        st.markdown('<p class="section-label">Try one of these questions</p>', unsafe_allow_html=True)
+        cols = st.columns(3)
+        for i, prompt in enumerate(SUGGESTED_PROMPTS):
+            with cols[i % 3]:
+                if st.button(prompt, key=f"suggest_{i}", use_container_width=True):
+                    # Inject the suggested prompt as if the user typed it
+                    st.session_state.pending_prompt = prompt
+                    st.rerun()
+
+    # Render previous messages (with sources and audio on assistant turns)
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"], avatar="🌿" if msg["role"] == "assistant" else None):
             st.markdown(msg["content"])
@@ -523,15 +695,18 @@ def main():
                 render_sources(msg["sources"])
 
     # --- Chat input ---
+    # Check if a suggested prompt was clicked (set during rerun)
     user_input = st.chat_input("Ask about Lebanese agriculture…  /  اسأل عن الزراعة اللبنانية")
+    if "pending_prompt" in st.session_state:
+        user_input = st.session_state.pop("pending_prompt")
 
     if user_input:
-        # Show user message
+        # Append user message to history and render it immediately
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Rate limit
+        # Rate-limit check: session cap, daily cap, and cooldown
         allowed, limit_msg = check_rate_limit()
         if not allowed:
             with st.chat_message("assistant", avatar="🌿"):
@@ -540,7 +715,7 @@ def main():
 
         lang = detect_language(user_input)
 
-        # Retrieve & generate
+        # --- Retrieve relevant passages & generate a grounded answer ---
         with st.chat_message("assistant", avatar="🌿"):
             with st.spinner("Searching the guide & generating answer…" if lang == "english"
                             else "جارٍ البحث وإنشاء الإجابة…"):
@@ -554,10 +729,12 @@ def main():
                     st.session_state.messages.append({"role": "assistant", "content": no_result, "sources": []})
                     return
 
+                # Query the LLM with retrieved context chunks
                 answer, sources = query_openrouter(
                     user_input, context_chunks, selected_model, temperature, max_tokens
                 )
 
+                # If the API call failed, fall back to simple keyword matching
                 if answer.startswith("Error:"):
                     st.warning(answer)
                     answer = fallback_answer(user_input, context_chunks)
