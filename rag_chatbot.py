@@ -362,12 +362,14 @@ def _expand_query(query):
 # ---------------------------------------------------------------------------
 # LLM query with grounded prompt
 # ---------------------------------------------------------------------------
-def query_openrouter(query, context_chunks, model, temperature=0.4, max_tokens=600):
+def query_openrouter(query, context_chunks, model, temperature=0.4, max_tokens=600,
+                     conversation_history=None):
     """Send the query + retrieved context to an LLM via OpenRouter.
     Uses a two-tier prompt strategy:
       1. Answer from guide sources with [Source N] citations
       2. If guide is insufficient, supplement with general agricultural knowledge
          clearly labeled so the user can distinguish verified vs. general info.
+    Includes recent conversation history so the model can handle follow-up questions.
     Returns (answer_text, context_chunks) tuple."""
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
@@ -391,7 +393,8 @@ def query_openrouter(query, context_chunks, model, temperature=0.4, max_tokens=6
 2. إذا كانت المصادر لا تغطي الموضوع بالكامل أو لا تحتوي على معلومات كافية، اذكر ذلك بوضوح ثم قدّم معلومات إضافية مفيدة من معرفتك الزراعية العامة.
 3. ميّز بوضوح بين المعلومات من الدليل (مع الاستشهاد) والمعلومات من المعرفة العامة باستخدام عنوان "📚 معلومات عامة:" للقسم غير المستند إلى الدليل.
 4. كن عملياً ومحدداً.
-5. أجب باللغة العربية."""
+5. أجب باللغة العربية.
+6. يمكنك الإشارة إلى سياق المحادثة السابق للإجابة على الأسئلة المتابعة."""
     else:
         system_msg = """You are an agricultural advisor specializing in Lebanese farming.
 
@@ -400,13 +403,24 @@ Rules:
 2. If the sources do not fully cover the topic or lack sufficient detail, clearly state what the guide does not cover, then provide additional helpful information from your general agricultural knowledge.
 3. Clearly separate guide-sourced information (with citations) from general knowledge. Use the heading "📚 General Knowledge:" before any information not from the guide.
 4. Be specific and practical — give actionable advice.
-5. Never refuse to answer. Always be helpful."""
+5. Never refuse to answer. Always be helpful.
+6. You can reference prior conversation context to answer follow-up questions."""
 
     user_msg = f"""Sources from the Lebanese Agricultural Guide:
 
 {context_text}
 
 Question: {query}"""
+
+    # Build messages array: system prompt + recent conversation history + current question.
+    # Include the last 6 turns (3 user-assistant exchanges) to stay within token limits
+    # while giving the model enough context for follow-up questions.
+    api_messages = [{"role": "system", "content": system_msg}]
+    if conversation_history:
+        recent = conversation_history[-6:]
+        for turn in recent:
+            api_messages.append({"role": turn["role"], "content": turn["content"]})
+    api_messages.append({"role": "user", "content": user_msg})
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -416,10 +430,7 @@ Question: {query}"""
     }
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
+        "messages": api_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
@@ -598,6 +609,29 @@ def render_audio_button(text, lang, key):
 
 
 # ---------------------------------------------------------------------------
+# Chat history management
+# ---------------------------------------------------------------------------
+def _save_current_chat():
+    """Save the current conversation to session-based chat history.
+    Uses the first user message as the chat title (truncated).
+    Skips saving if the conversation is empty."""
+    if "saved_chats" not in st.session_state:
+        st.session_state.saved_chats = []
+    msgs = st.session_state.get("messages", [])
+    if not msgs:
+        return
+    # Derive title from the first user message
+    first_user = next((m["content"] for m in msgs if m["role"] == "user"), "Untitled")
+    title = first_user[:50] + ("…" if len(first_user) > 50 else "")
+    # Strip source data to save memory (only keep role + content)
+    clean = [{"role": m["role"], "content": m["content"]} for m in msgs]
+    st.session_state.saved_chats.append({"title": title, "messages": clean})
+    # Keep at most 10 saved chats to avoid excessive memory usage
+    if len(st.session_state.saved_chats) > 10:
+        st.session_state.saved_chats.pop(0)
+
+
+# ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
 def main():
@@ -630,8 +664,9 @@ def main():
 
         st.markdown("---")
 
-        # New Chat button — clears conversation history so the user can start fresh
+        # New Chat button — saves current conversation and starts fresh
         if st.button("🗑️ New Chat", use_container_width=True):
+            _save_current_chat()
             st.session_state.messages = []
             st.rerun()
 
@@ -640,6 +675,22 @@ def main():
             st.session_state.query_count = 0
         remaining = MAX_QUERIES_PER_SESSION - st.session_state.query_count
         st.metric("Queries remaining", f"{remaining}")
+
+        # --- Chat history panel: list of saved conversations ---
+        st.markdown("---")
+        st.markdown("### 💬 Chat History")
+        if "saved_chats" not in st.session_state:
+            st.session_state.saved_chats = []
+
+        if st.session_state.saved_chats:
+            for idx, chat in enumerate(reversed(st.session_state.saved_chats)):
+                chat_idx = len(st.session_state.saved_chats) - 1 - idx
+                if st.button(f"📝 {chat['title']}", key=f"load_chat_{chat_idx}",
+                             use_container_width=True):
+                    st.session_state.messages = chat["messages"].copy()
+                    st.rerun()
+        else:
+            st.caption("No saved chats yet. Start a conversation!")
 
         st.markdown("---")
         st.caption(f"📚 {len(chunks)} passages indexed")
@@ -734,8 +785,10 @@ def main():
                 # Always call the LLM — even with no/few chunks.
                 # The two-tier prompt will use guide sources when available
                 # and supplement with general knowledge when needed.
+                # Pass conversation history so the model can handle follow-ups.
                 answer, sources = query_openrouter(
-                    user_input, context_chunks, selected_model, temperature, max_tokens
+                    user_input, context_chunks, selected_model, temperature, max_tokens,
+                    conversation_history=st.session_state.messages,
                 )
 
                 # If the API call failed, fall back to simple keyword matching
