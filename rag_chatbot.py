@@ -95,6 +95,11 @@ CHUNKS = []
 VECTORIZER = None
 VECTORS = None
 
+# Rate limiting settings
+MAX_QUERIES_PER_SESSION = 20      # Per user session
+MAX_QUERIES_PER_DAY_GLOBAL = 200  # Across all users combined
+COOLDOWN_SECONDS = 5              # Minimum seconds between queries
+
 # Local model variables
 TTS_MODEL = None
 WHISPER_MODEL = None
@@ -492,6 +497,59 @@ def get_most_relevant_chunks(query, top_k=3):
     # Return relevant chunks
     return [CHUNKS[i] for i in top_indices if similarities[i] > 0.1]
 
+def check_rate_limit():
+    """Check if the user is within rate limits. Returns (allowed, message)."""
+    import time
+    from datetime import date
+    
+    # Initialize session counters
+    if "query_count" not in st.session_state:
+        st.session_state.query_count = 0
+    if "last_query_time" not in st.session_state:
+        st.session_state.last_query_time = 0
+    
+    # Initialize global daily counter (shared file-based)
+    today = date.today().isoformat()
+    counter_file = os.path.join(tempfile.gettempdir(), "openrouter_daily_count.json")
+    
+    try:
+        if os.path.exists(counter_file):
+            with open(counter_file, "r") as f:
+                daily_data = json.load(f)
+            if daily_data.get("date") != today:
+                daily_data = {"date": today, "count": 0}
+        else:
+            daily_data = {"date": today, "count": 0}
+    except Exception:
+        daily_data = {"date": today, "count": 0}
+    
+    # Check per-session limit
+    if st.session_state.query_count >= MAX_QUERIES_PER_SESSION:
+        return False, f"Session limit reached ({MAX_QUERIES_PER_SESSION} queries). Please refresh the page to start a new session."
+    
+    # Check global daily limit
+    if daily_data["count"] >= MAX_QUERIES_PER_DAY_GLOBAL:
+        return False, "Daily usage limit reached. Please try again tomorrow."
+    
+    # Check cooldown
+    elapsed = time.time() - st.session_state.last_query_time
+    if elapsed < COOLDOWN_SECONDS:
+        wait = int(COOLDOWN_SECONDS - elapsed) + 1
+        return False, f"Please wait {wait} seconds between queries."
+    
+    # Update counters
+    st.session_state.query_count += 1
+    st.session_state.last_query_time = time.time()
+    daily_data["count"] += 1
+    
+    try:
+        with open(counter_file, "w") as f:
+            json.dump(daily_data, f)
+    except Exception:
+        pass  # Non-critical if file write fails
+    
+    return True, None
+
 def query_openrouter(query, context, model="openai/gpt-3.5-turbo", temperature=0.7, max_tokens=800):
     """Query OpenRouter API with the question and context"""
     api_key = os.getenv("OPENROUTER_API_KEY")
@@ -767,16 +825,11 @@ def main():
                         if audio_html:
                             st.markdown(audio_html, unsafe_allow_html=True)
     
-    # Model selection dropdown
+    # Model selection — only cost-effective models for public deployment
     model_options = {
         "GPT-3.5 Turbo": "openai/gpt-3.5-turbo",
-        "GPT-4o": "openai/gpt-4o",
-        "Claude Instant": "anthropic/claude-instant-1.2",
         "Claude 3 Haiku": "anthropic/claude-3-haiku-20240307",
-        "Claude 3 Sonnet": "anthropic/claude-3-sonnet-20240229",
-        "Claude 3 Opus": "anthropic/claude-3-opus-20240229",
         "Llama 3 70B": "meta-llama/llama-3-70b-instruct",
-        "Mistral Large": "mistralai/mistral-large-latest",
     }
     
     selected_model_name = st.sidebar.selectbox(
@@ -795,14 +848,21 @@ def main():
         step=0.1
     )
     
-    # Response length slider
+    # Response length slider (capped to control costs)
     max_tokens = st.sidebar.slider(
         "Maximum Response Length:",
-        min_value=300,
-        max_value=1500,
+        min_value=200,
+        max_value=800,
         value=800,
         step=100
     )
+    
+    # Display usage counter in sidebar
+    if "query_count" not in st.session_state:
+        st.session_state.query_count = 0
+    remaining = MAX_QUERIES_PER_SESSION - st.session_state.query_count
+    st.sidebar.write("---")
+    st.sidebar.write(f"**Queries remaining:** {remaining}/{MAX_QUERIES_PER_SESSION}")
     
     # Query input
     st.write("Ask any question about Lebanese agriculture:")
@@ -874,6 +934,12 @@ def main():
             fallback_header = "### Fallback Answer (Basic Text Matching)"
             no_info_message = "No relevant information found in the agricultural guide."
             model_info = f"*Answer generated using: {selected_model_name}*"
+        
+        # Check rate limit before calling API
+        allowed, limit_msg = check_rate_limit()
+        if not allowed:
+            st.warning(f"⏳ {limit_msg}")
+            st.stop()
         
         with st.spinner(search_message):
             # Get relevant document chunks
