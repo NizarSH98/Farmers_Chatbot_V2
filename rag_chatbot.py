@@ -329,7 +329,7 @@ def get_relevant_chunks(query, chunks, vectorizer, vectors, top_k=5):
     results = []
     seen_texts = set()
     for idx in ranked:
-        if scores[idx] < 0.05:
+        if scores[idx] < 0.02:
             break
         text_sig = chunks[idx]["text"][:100]
         if text_sig in seen_texts:
@@ -364,33 +364,43 @@ def _expand_query(query):
 # ---------------------------------------------------------------------------
 def query_openrouter(query, context_chunks, model, temperature=0.4, max_tokens=600):
     """Send the query + retrieved context to an LLM via OpenRouter.
-    The system prompt enforces source-only answers with [Source N] citations.
+    Uses a two-tier prompt strategy:
+      1. Answer from guide sources with [Source N] citations
+      2. If guide is insufficient, supplement with general agricultural knowledge
+         clearly labeled so the user can distinguish verified vs. general info.
     Returns (answer_text, context_chunks) tuple."""
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         return "Error: OpenRouter API key not configured.", []
 
+    lang = detect_language(query)
+    has_sources = bool(context_chunks)
+
+    # Build numbered context block (may be empty if no chunks matched)
     context_parts = []
     for i, c in enumerate(context_chunks, 1):
         context_parts.append(f"[Source {i} — Page {c['page']}]\n{c['text']}")
-    context_text = "\n\n".join(context_parts)
+    context_text = "\n\n".join(context_parts) if context_parts else "(No relevant passages found in the guide.)"
 
-    lang = detect_language(query)
-
+    # --- Two-tier prompt: guide-first, then general knowledge if needed ---
     if lang == "arabic":
-        system_msg = """أنت مساعد زراعي متخصص في الزراعة اللبنانية. أجب فقط بناءً على المصادر المقدمة أدناه.
+        system_msg = """أنت مساعد زراعي متخصص في الزراعة اللبنانية.
+
 القواعد:
-- استخدم المعلومات من المصادر المرقمة فقط
-- أشر إلى رقم المصدر عند الاستشهاد بمعلومة (مثال: [المصدر 1])
-- إذا لم تجد إجابة في المصادر، قل ذلك بوضوح ولا تختلق معلومات
-- أجب باللغة العربية"""
+1. أولاً، أجب باستخدام المصادر المقدمة أدناه. أشر إلى رقم المصدر عند الاستشهاد (مثال: [المصدر 1]).
+2. إذا كانت المصادر لا تغطي الموضوع بالكامل أو لا تحتوي على معلومات كافية، اذكر ذلك بوضوح ثم قدّم معلومات إضافية مفيدة من معرفتك الزراعية العامة.
+3. ميّز بوضوح بين المعلومات من الدليل (مع الاستشهاد) والمعلومات من المعرفة العامة باستخدام عنوان "📚 معلومات عامة:" للقسم غير المستند إلى الدليل.
+4. كن عملياً ومحدداً.
+5. أجب باللغة العربية."""
     else:
-        system_msg = """You are an agricultural advisor specializing in Lebanese farming. Answer ONLY based on the provided sources below.
+        system_msg = """You are an agricultural advisor specializing in Lebanese farming.
+
 Rules:
-- Use ONLY information from the numbered sources
-- Cite the source number when referencing information (e.g., [Source 1])
-- If the sources don't contain enough information to answer, say so clearly — do NOT make up information
-- Be specific and practical"""
+1. First, answer using the provided source passages below. Cite sources with [Source N] when referencing guide content.
+2. If the sources do not fully cover the topic or lack sufficient detail, clearly state what the guide does not cover, then provide additional helpful information from your general agricultural knowledge.
+3. Clearly separate guide-sourced information (with citations) from general knowledge. Use the heading "📚 General Knowledge:" before any information not from the guide.
+4. Be specific and practical — give actionable advice.
+5. Never refuse to answer. Always be helpful."""
 
     user_msg = f"""Sources from the Lebanese Agricultural Guide:
 
@@ -644,12 +654,12 @@ def main():
             st.markdown(
                 "This chatbot answers questions about Lebanese agriculture "
                 "using the official *Agricultural Guide for Lebanon* as its "
-                "sole knowledge source. Answers include source citations so "
-                "you can verify every claim.\n\n"
-                "**How it works:** Your question is matched against passages "
-                "from the guide using TF-IDF similarity. The best-matching "
-                "passages are sent to an AI model that generates a grounded, "
-                "cited answer.\n\n"
+                "primary knowledge source. Answers include source citations so "
+                "you can verify guide-based claims.\n\n"
+                "When the guide doesn’t fully cover a topic, the assistant "
+                "supplements with general agricultural knowledge, clearly "
+                "labeled as “General Knowledge” so you always know what’s "
+                "from the guide vs. the AI.\n\n"
                 "Built with ❤️ by Nizar Shehayeb"
             )
 
@@ -663,8 +673,8 @@ def main():
             '<div class="welcome-card">'
             '<h2>🌱 Welcome! أهلاً وسهلاً!</h2>'
             '<p>I\'m your AI farming assistant for Lebanon. Ask me anything about crops, '
-            'irrigation, pest control, soil management, and more — all answers are sourced '
-            'directly from the official Agricultural Guide.</p>'
+            'irrigation, pest control, soil management, and more. I\'ll check the official '
+            'Agricultural Guide first, and supplement with expert knowledge when needed.</p>'
             '<div class="capabilities">'
             '<span class="capability-pill">🌿 Crop recommendations</span>'
             '<span class="capability-pill">💧 Irrigation advice</span>'
@@ -721,15 +731,9 @@ def main():
                             else "جارٍ البحث وإنشاء الإجابة…"):
                 context_chunks = get_relevant_chunks(user_input, chunks, vectorizer, vectors, top_k=5)
 
-                if not context_chunks:
-                    no_result = ("لم يتم العثور على معلومات ذات صلة في الدليل."
-                                 if lang == "arabic" else
-                                 "No relevant information found in the guide for this question.")
-                    st.markdown(no_result)
-                    st.session_state.messages.append({"role": "assistant", "content": no_result, "sources": []})
-                    return
-
-                # Query the LLM with retrieved context chunks
+                # Always call the LLM — even with no/few chunks.
+                # The two-tier prompt will use guide sources when available
+                # and supplement with general knowledge when needed.
                 answer, sources = query_openrouter(
                     user_input, context_chunks, selected_model, temperature, max_tokens
                 )
@@ -740,7 +744,9 @@ def main():
                     answer = fallback_answer(user_input, context_chunks)
 
                 st.markdown(answer)
-                render_sources(sources)
+                # Only show source panel if retrieval found relevant passages
+                if sources:
+                    render_sources(sources)
                 render_audio_button(answer, lang, key=f"tts_{len(st.session_state.messages)}")
 
             st.session_state.messages.append({
