@@ -84,6 +84,13 @@ except ImportError as e:
     PLAYHT_AVAILABLE = False
     PLAYHT_IMPORT_ERROR = str(e)
 
+try:
+    import edge_tts
+    import asyncio
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+
 # Load environment variables
 load_dotenv()
 
@@ -360,23 +367,70 @@ def text_to_speech_fallback(text, language="english"):
     except Exception as e:
         return None, f"Fallback TTS error: {str(e)}"
 
+def text_to_speech_edge(text, language="english"):
+    """Convert text to speech using Microsoft Edge TTS (free, high quality)"""
+    if not EDGE_TTS_AVAILABLE:
+        return None, "edge-tts not installed. pip install edge-tts"
+    
+    try:
+        # Select voice based on language
+        if language == "arabic":
+            voice = "ar-SA-HamedNeural"  # Arabic male
+        else:
+            voice = "en-US-JennyNeural"  # English female
+        
+        # Run async edge-tts in sync context
+        async def _generate():
+            communicate = edge_tts.Communicate(text, voice)
+            fd, output_path = tempfile.mkstemp(suffix=".mp3")
+            os.close(fd)
+            await communicate.save(output_path)
+            return output_path
+        
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        output_path = loop.run_until_complete(_generate())
+        
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            with open(output_path, "rb") as f:
+                audio_content = f.read()
+            try:
+                os.unlink(output_path)
+            except:
+                pass
+            return audio_content, None
+        
+        return None, "Edge TTS produced empty output"
+        
+    except Exception as e:
+        return None, f"Edge TTS error: {str(e)}"
+
 def text_to_speech(text, language="english"):
-    """Convert text to speech using PlayHT API with local models as fallback"""
-    # Try PlayHT API first (highest quality)
+    """Convert text to speech — Edge TTS (free) first, then fallbacks"""
+    # Try Edge TTS first (free, high quality)
+    audio_content, error = text_to_speech_edge(text, language)
+    if audio_content is not None:
+        return audio_content, error
+    
+    # Try PlayHT if available
     audio_content, error = text_to_speech_playht(text, language)
-    
     if audio_content is not None:
         return audio_content, error
     
-    # If PlayHT failed, try local TTS
-    st.info("PlayHT TTS failed, trying local TTS...")
+    # Try local TTS
     audio_content, error = text_to_speech_local(text, language)
-    
     if audio_content is not None:
         return audio_content, error
     
-    # If both failed, try system fallback
-    st.info("Local TTS also failed, trying system fallback TTS...")
+    # System fallback
     return text_to_speech_fallback(text, language)
 
 def speech_to_text_openai_api(audio_bytes):
