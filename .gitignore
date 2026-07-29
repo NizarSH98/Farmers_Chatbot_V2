@@ -1,6 +1,8 @@
 # Environment variables / secrets
 .env
 .env.*
+!.env.example
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
@@ -8,6 +10,7 @@ __pycache__/
 *.egg-info/
 venv/
 .venv/
+.audit_venv/
 
 # Temp files
 temp_dir/
@@ -27,3 +30,18 @@ Thumbs.db
 *.pt
 *.bin
 *.onnx
+
+# Local runtime evidence and databases
+data/*.sqlite3
+data/*.sqlite3-*
+data/pilot_files/
+data/artifacts/
+reports/generated/
+
+# Contractual source workbook is local evidence, not deployed runtime material.
+RAISE_Logframe_final.xlsx
+
+# Test/build output
+.pytest_cache/
+.coverage
+htmlcov/

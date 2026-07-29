@@ -1,0 +1,31 @@
+{"id":"EN-001","language":"english","question":"What information do you need before recommending a crop for my land in Akkar?","relevant_ids":["AKKAR-PROFILE-001","FARMER-QUESTION-018"],"tags":["Akkar","intake"],"priority":true}
+{"id":"AR-001","language":"arabic","question":"ما المعلومات التي تحتاجها قبل أن تنصحني بمحصول مناسب لأرضي في عكار؟","relevant_ids":["AKKAR-PROFILE-001","FARMER-QUESTION-018"],"tags":["Akkar","intake"],"priority":true}
+{"id":"EN-002","language":"english","question":"How important is potato production in Akkar?","relevant_ids":["AKKAR-SECTOR-002","POTATO-DECISIONS-003"],"tags":["potato","Akkar"],"priority":true}
+{"id":"AR-002","language":"arabic","question":"ما أهمية إنتاج البطاطا في عكار؟","relevant_ids":["AKKAR-SECTOR-002","POTATO-DECISIONS-003"],"tags":["potato","Akkar"],"priority":true}
+{"id":"EN-003","language":"english","question":"Can you tell me which pesticide and dose to use on my potato field?","relevant_ids":["POTATO-DECISIONS-003","SAFE-ADVICE-016"],"tags":["potato","safety"],"priority":true}
+{"id":"AR-003","language":"arabic","question":"ما اسم المبيد والجرعة التي أستخدمها في حقل البطاطا؟","relevant_ids":["POTATO-DECISIONS-003","SAFE-ADVICE-016"],"tags":["potato","safety"],"priority":true}
+{"id":"EN-004","language":"english","question":"My greenhouse cucumbers are wilting. What should I check first?","relevant_ids":["GREENHOUSE-DECISIONS-004"],"tags":["greenhouse","cucumber"],"priority":true}
+{"id":"AR-004","language":"arabic","question":"الخيار في البيت البلاستيكي يذبل، ماذا أفحص أولاً؟","relevant_ids":["GREENHOUSE-DECISIONS-004"],"tags":["greenhouse","cucumber"],"priority":true}
+{"id":"EN-005","language":"english","question":"Is avocado suitable everywhere in Akkar?","relevant_ids":["ORCHARD-DECISIONS-005","AKKAR-PROFILE-001"],"tags":["avocado","orchard"],"priority":true}
+{"id":"AR-005","language":"arabic","question":"هل تنجح زراعة الأفوكادو في كل مناطق عكار؟","relevant_ids":["ORCHARD-DECISIONS-005","AKKAR-PROFILE-001"],"tags":["avocado","orchard"],"priority":true}
+{"id":"EN-006","language":"english","question":"How should I decide when and how much to irrigate?","relevant_ids":["WATER-IRRIGATION-006"],"tags":["water","irrigation"],"priority":true}
+{"id":"AR-006","language":"arabic","question":"كيف أحدد موعد الري وكمية المياه؟","relevant_ids":["WATER-IRRIGATION-006"],"tags":["water","irrigation"],"priority":true}
+{"id":"EN-007","language":"english","question":"Can you recommend fertilizer without a soil test?","relevant_ids":["SOIL-FERTILITY-007"],"tags":["soil","fertility"],"priority":true}
+{"id":"AR-007","language":"arabic","question":"هل يمكنك إعطائي برنامج تسميد من دون تحليل للتربة؟","relevant_ids":["SOIL-FERTILITY-007"],"tags":["soil","fertility"],"priority":true}
+{"id":"EN-008","language":"english","question":"What has ESDU tested with livestock farmers in Akkar?","relevant_ids":["ESDU-LIVING-LABS-011","LIVESTOCK-SYSTEMS-008"],"tags":["ESDU","livestock","Akkar"],"priority":true}
+{"id":"AR-008","language":"arabic","question":"ما التقنيات التي جرّبتها ESDU مع مربي المواشي في عكار؟","relevant_ids":["ESDU-LIVING-LABS-011","LIVESTOCK-SYSTEMS-008"],"tags":["ESDU","livestock","Akkar"],"priority":true}
+{"id":"EN-009","language":"english","question":"What is special about ESDU's development approach?","relevant_ids":["ESDU-IDENTITY-010"],"tags":["ESDU","governance"],"priority":true}
+{"id":"AR-009","language":"arabic","question":"ما الذي يميّز مقاربة ESDU في التنمية الريفية؟","relevant_ids":["ESDU-IDENTITY-010"],"tags":["ESDU","governance"],"priority":true}
+{"id":"EN-010","language":"english","question":"Which value chains did ESDU work on in Akkar and Danniyeh?","relevant_ids":["VALUE-CHAINS-009"],"tags":["ESDU","value-chain"],"priority":true}
+{"id":"AR-010","language":"arabic","question":"ما سلاسل القيمة التي عملت عليها ESDU في عكار والضنية؟","relevant_ids":["VALUE-CHAINS-009"],"tags":["ESDU","value-chain"],"priority":true}
+{"id":"EN-011","language":"english","question":"How does Ardi Ardak connect rural women and local markets?","relevant_ids":["ESDU-LOCAL-FOOD-012"],"tags":["ESDU","women","markets"],"priority":true}
+{"id":"AR-011","language":"arabic","question":"كيف تربط مبادرة أرضي أرضك النساء الريفيات بالأسواق المحلية؟","relevant_ids":["ESDU-LOCAL-FOOD-012"],"tags":["ESDU","women","markets"],"priority":true}
+{"id":"EN-012","language":"english","question":"Why should old planting calendars be adjusted for current conditions?","relevant_ids":["CLIMATE-RISK-014"],"tags":["climate","calendar"],"priority":true}
+{"id":"AR-012","language":"arabic","question":"لماذا يجب تعديل الروزنامة الزراعية القديمة بحسب الظروف الحالية؟","relevant_ids":["CLIMATE-RISK-014"],"tags":["climate","calendar"],"priority":true}
+{"id":"EN-013","language":"english","question":"What should I know about the buyer before planting?","relevant_ids":["POSTHARVEST-MARKET-015"],"tags":["market","post-harvest"],"priority":true}
+{"id":"AR-013","language":"arabic","question":"ما الذي يجب أن أعرفه عن المشتري قبل الزراعة؟","relevant_ids":["POSTHARVEST-MARKET-015"],"tags":["market","post-harvest"],"priority":true}
+{"id":"EN-014","language":"english","question":"What information must be checked live instead of taken from the guide?","relevant_ids":["DYNAMIC-INFORMATION-017"],"tags":["tools","dynamic"],"priority":true}
+{"id":"AR-014","language":"arabic","question":"ما المعلومات التي يجب التحقق منها مباشرة ولا تؤخذ من الدليل الثابت؟","relevant_ids":["DYNAMIC-INFORMATION-017"],"tags":["tools","dynamic"],"priority":true}
+{"id":"EN-015","language":"english","question":"Several goats became sick suddenly and one cannot stand. What should I do?","relevant_ids":["LIVESTOCK-SYSTEMS-008","SAFE-ADVICE-016"],"tags":["livestock","emergency"],"priority":true}
+{"id":"AR-015","language":"arabic","question":"مرضت عدة ماعز فجأة وإحداها لا تستطيع الوقوف، ماذا أفعل؟","relevant_ids":["LIVESTOCK-SYSTEMS-008","SAFE-ADVICE-016"],"tags":["livestock","emergency"],"priority":true}
+
