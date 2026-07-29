@@ -6,7 +6,7 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +84,7 @@ class EvidenceStore:
         return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
 
     def check_rate_limit(self, session_id: str) -> RateLimitResult:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         now_text = now.isoformat()
         day = now.date().isoformat()
         session_hash = self.session_hash(session_id)
@@ -222,7 +222,7 @@ class EvidenceStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     self.session_hash(session_id),
                     category,
                     rating,
@@ -235,7 +235,9 @@ class EvidenceStore:
 
     def feedback_summary(self) -> dict[str, Any]:
         with self._connect() as connection:
-            total = int(connection.execute("SELECT COUNT(*) FROM feedback").fetchone()[0])
+            total = int(
+                connection.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+            )
             validated_high = int(
                 connection.execute(
                     """
@@ -253,9 +255,7 @@ class EvidenceStore:
                 ).fetchone()[0]
             )
         resolution_percent = (
-            round(resolved_high / validated_high * 100, 1)
-            if validated_high
-            else None
+            round(resolved_high / validated_high * 100, 1) if validated_high else None
         )
         return {
             "total_feedback": total,

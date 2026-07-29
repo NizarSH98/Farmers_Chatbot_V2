@@ -6,7 +6,7 @@ import io
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from docx import Document
@@ -69,7 +69,7 @@ def _set_paragraph_direction(paragraph: Any, arabic: bool) -> None:
     if not arabic:
         return
     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    properties = paragraph._p.get_or_add_pPr()  # noqa: SLF001
+    properties = paragraph._p.get_or_add_pPr()
     bidi = OxmlElement("w:bidi")
     bidi.set(qn("w:val"), "1")
     properties.append(bidi)
@@ -87,7 +87,7 @@ def _docx_bytes(
     document = Document()
     heading = document.add_heading(_limited_text(title, 200), 0)
     _set_paragraph_direction(heading, arabic)
-    generated = datetime.now(timezone.utc).date().isoformat()
+    generated = datetime.now(UTC).date().isoformat()
     paragraph = document.add_paragraph(f"Generated / أُنشئ: {generated}")
     _set_paragraph_direction(paragraph, arabic)
 
@@ -162,9 +162,7 @@ class ArtifactService:
     ) -> ArtifactReference:
         if self.store.artifacts_today(self.owner_user_id) >= MAX_ARTIFACTS_PER_USER_DAY:
             raise ValueError("Daily artifact generation limit reached")
-        storage_path = (
-            f"users/{self.owner_user_id}/artifacts/{uuid.uuid4()}-{filename}"
-        )
+        storage_path = f"users/{self.owner_user_id}/artifacts/{uuid.uuid4()}-{filename}"
         self.storage.put(storage_path, data, mime_type)
         try:
             artifact_id = self.store.add_artifact(
@@ -226,9 +224,7 @@ class ArtifactService:
             ("Inspection checks / نقاط الفحص", [f"☐ {item}" for item in checks]),
         ]
         if escalation_signs:
-            sections.append(
-                ("Escalate when / متى تجب الإحالة", escalation_signs)
-            )
+            sections.append(("Escalate when / متى تجب الإحالة", escalation_signs))
         data = _docx_bytes(
             title=title,
             sections=sections,
@@ -311,7 +307,7 @@ class ArtifactService:
         for column in "ABCDE":
             sheet.column_dimensions[column].width = 28
         meta = workbook.create_sheet("Assumptions and sources")
-        meta.append(["Generated", datetime.now(timezone.utc).isoformat()])
+        meta.append(["Generated", datetime.now(UTC).isoformat()])
         meta.append(["Language", language])
         meta.append(["Assumptions"])
         for item in (assumptions or [])[:20]:
@@ -364,7 +360,9 @@ class ArtifactService:
             current = sheet.max_row
             sheet.cell(current, 5, f"=B{current}*D{current}")
         cost_end = sheet.max_row
-        sheet.append(["Total costs", None, None, None, f"=SUM(E{cost_start}:E{cost_end})"])
+        sheet.append(
+            ["Total costs", None, None, None, f"=SUM(E{cost_start}:E{cost_end})"]
+        )
         total_cost_row = sheet.max_row
 
         sheet.append([])
@@ -409,7 +407,7 @@ class ArtifactService:
             for cell in sheet[row_number]:
                 cell.font = Font(bold=True)
         meta = workbook.create_sheet("Assumptions and sources")
-        meta.append(["Generated", datetime.now(timezone.utc).isoformat()])
+        meta.append(["Generated", datetime.now(UTC).isoformat()])
         meta.append(["Currency", _safe_cell(currency)])
         meta.append(["Assumptions"])
         for item in (assumptions or [])[:30]:

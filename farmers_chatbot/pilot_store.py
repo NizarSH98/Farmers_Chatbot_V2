@@ -7,11 +7,12 @@ import hmac
 import json
 import sqlite3
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .auth import UserIdentity
 from .config import (
@@ -27,7 +28,7 @@ from .config import (
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,9 @@ class PilotStore:
     ) -> None:
         self.database_url = database_url.strip()
         self.sqlite_path = Path(sqlite_path)
-        self.is_postgres = self.database_url.startswith(("postgres://", "postgresql://"))
+        self.is_postgres = self.database_url.startswith(
+            ("postgres://", "postgresql://")
+        )
         if not self.is_postgres:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -221,9 +224,7 @@ class PilotStore:
         role = "admin" if identity.is_admin else "user"
         with self._connect() as connection:
             row = connection.execute(
-                self._sql(
-                    "SELECT * FROM users WHERE issuer = ? AND subject = ?"
-                ),
+                self._sql("SELECT * FROM users WHERE issuer = ? AND subject = ?"),
                 (identity.issuer, identity.subject),
             ).fetchone()
             if row:
@@ -362,9 +363,7 @@ class PilotStore:
     def get_project(self, owner_user_id: str, project_id: str) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
-                self._sql(
-                    "SELECT * FROM projects WHERE id = ? AND owner_user_id = ?"
-                ),
+                self._sql("SELECT * FROM projects WHERE id = ? AND owner_user_id = ?"),
                 (project_id, owner_user_id),
             ).fetchone()
         if not row:
@@ -408,9 +407,7 @@ class PilotStore:
         paths = [item["storage_path"] for item in [*documents, *artifacts]]
         with self._connect() as connection:
             cursor = connection.execute(
-                self._sql(
-                    "DELETE FROM projects WHERE id = ? AND owner_user_id = ?"
-                ),
+                self._sql("DELETE FROM projects WHERE id = ? AND owner_user_id = ?"),
                 (project_id, owner_user_id),
             )
             if cursor.rowcount != 1:
@@ -562,7 +559,9 @@ class PilotStore:
             if cursor.rowcount != 1:
                 raise ValueError("Conversation not found")
 
-    def delete_conversation(self, owner_user_id: str, conversation_id: str) -> list[str]:
+    def delete_conversation(
+        self, owner_user_id: str, conversation_id: str
+    ) -> list[str]:
         artifacts = self.list_artifacts(
             owner_user_id,
             conversation_id=conversation_id,
@@ -635,9 +634,7 @@ class PilotStore:
                 ),
             )
             connection.execute(
-                self._sql(
-                    "UPDATE conversations SET updated_at = ? WHERE id = ?"
-                ),
+                self._sql("UPDATE conversations SET updated_at = ? WHERE id = ?"),
                 (now, conversation_id),
             )
         return message_id
@@ -851,9 +848,7 @@ class PilotStore:
     def get_artifact(self, owner_user_id: str, artifact_id: str) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
-                self._sql(
-                    "SELECT * FROM artifacts WHERE id = ? AND owner_user_id = ?"
-                ),
+                self._sql("SELECT * FROM artifacts WHERE id = ? AND owner_user_id = ?"),
                 (artifact_id, owner_user_id),
             ).fetchone()
         if not row:
@@ -889,7 +884,7 @@ class PilotStore:
         return [dict(row) for row in rows]
 
     def artifacts_today(self, owner_user_id: str) -> int:
-        day_prefix = datetime.now(timezone.utc).date().isoformat() + "%"
+        day_prefix = datetime.now(UTC).date().isoformat() + "%"
         with self._connect() as connection:
             row = connection.execute(
                 self._sql(
@@ -903,7 +898,7 @@ class PilotStore:
         return int(row["count"])
 
     def check_rate_limit(self, user_id: str, mode: str = "standard") -> PilotRateLimit:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         day = now.date().isoformat()
         with self._connect() as connection:
             user_count = int(
@@ -952,7 +947,9 @@ class PilotStore:
             if global_count >= MAX_PILOT_QUERIES_PER_DAY:
                 return PilotRateLimit(False, "Daily pilot limit reached.", remaining)
             if mode == "deep" and deep_count >= MAX_DEEP_QUERIES_PER_USER_DAY:
-                return PilotRateLimit(False, "Daily Deep-mode limit reached.", remaining)
+                return PilotRateLimit(
+                    False, "Daily Deep-mode limit reached.", remaining
+                )
             if last:
                 elapsed = (
                     now - datetime.fromisoformat(str(last["occurred_at"]))

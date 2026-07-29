@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -76,7 +76,7 @@ def main() -> int:
             results = list(pool.map(run, range(max(1, args.iterations))))
     durations = [result["duration_ms"] for result in results]
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "profile": "connected-model" if args.connected else "local-retrieval-fallback",
         "iterations": len(results),
         "workers": args.workers,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .pilot_store import PilotStore
@@ -18,13 +18,11 @@ def purge_expired_content(
 
     if retention_days < 1:
         raise ValueError("Retention must be at least one day")
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
     paths: list[str] = []
-    with store._connect() as connection:  # noqa: SLF001 - store transaction boundary
+    with store._connect() as connection:
         message_rows = connection.execute(
-            store._sql(  # noqa: SLF001
-                "SELECT attachments_json FROM messages WHERE created_at < ?"
-            ),
+            store._sql("SELECT attachments_json FROM messages WHERE created_at < ?"),
             (cutoff,),
         ).fetchall()
         for row in message_rows:
@@ -34,13 +32,11 @@ def purge_expired_content(
                     paths.append(str(storage_path))
 
         document_rows = connection.execute(
-            store._sql(  # noqa: SLF001
-                "SELECT storage_path FROM documents WHERE created_at < ?"
-            ),
+            store._sql("SELECT storage_path FROM documents WHERE created_at < ?"),
             (cutoff,),
         ).fetchall()
         artifact_rows = connection.execute(
-            store._sql(  # noqa: SLF001
+            store._sql(
                 """
                 SELECT storage_path FROM artifacts
                 WHERE created_at < ? OR conversation_id IN (
@@ -64,15 +60,13 @@ def purge_expired_content(
             "DELETE FROM conversations WHERE updated_at < ?",
             "DELETE FROM whatsapp_events WHERE received_at < ?",
         ):
-            connection.execute(store._sql(statement), (cutoff,))  # noqa: SLF001
+            connection.execute(store._sql(statement), (cutoff,))
         connection.execute(
-            store._sql(  # noqa: SLF001
-                "UPDATE query_events SET user_id = NULL WHERE occurred_at < ?"
-            ),
+            store._sql("UPDATE query_events SET user_id = NULL WHERE occurred_at < ?"),
             (cutoff,),
         )
         connection.execute(
-            store._sql(  # noqa: SLF001
+            store._sql(
                 """
                 UPDATE feedback SET user_id = NULL, message_id = NULL
                 WHERE occurred_at < ?

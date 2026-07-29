@@ -23,8 +23,8 @@ from .config import (
     MODE_PROFILES,
     RETENTION_DAYS,
 )
-from .documents import DocumentService
 from .deployment_guard import validate_web_runtime
+from .documents import DocumentService
 from .knowledge import KnowledgeIndex
 from .language import detect_language
 from .llm import AssistantRequest, AssistantService
@@ -147,7 +147,7 @@ def _delete_paths(storage: PrivateFileStorage, paths: list[str]) -> None:
     for path in paths:
         try:
             storage.delete(path)
-        except Exception:  # noqa: BLE001 - deletion continues for remaining owned files
+        except Exception:  # noqa: BLE001, S112 - continue deleting owned files
             continue
 
 
@@ -167,9 +167,7 @@ def render_project_manager(
         project_options,
         index=selected_index,
         format_func=lambda item: (
-            "No project / بدون مشروع"
-            if item is None
-            else project_by_id[item]["name"]
+            "No project / بدون مشروع" if item is None else project_by_id[item]["name"]
         ),
         key="project_selector",
     )
@@ -323,11 +321,7 @@ def render_conversation_manager(
         if st.button(
             label,
             key=f"conversation_{conversation['id']}",
-            type=(
-                "primary"
-                if conversation["id"] == conversation_id
-                else "secondary"
-            ),
+            type=("primary" if conversation["id"] == conversation_id else "secondary"),
             use_container_width=True,
         ):
             st.session_state.conversation_id = conversation["id"]
@@ -459,10 +453,10 @@ def render_artifacts(
     for artifact_id in artifact_ids:
         try:
             artifact = store.get_artifact(identity.user_id, artifact_id)
-            signed_url = storage.signed_url(artifact['storage_path'], 600)
+            signed_url = storage.signed_url(artifact["storage_path"], 600)
             if signed_url:
                 st.link_button(
-                    'Download ' + artifact['filename'],
+                    "Download " + artifact["filename"],
                     signed_url,
                     use_container_width=True,
                 )
@@ -522,8 +516,7 @@ def render_audio(message: dict[str, Any]) -> None:
                 st.audio(
                     synthesize_edge(
                         message["content"],
-                        message.get("language")
-                        or detect_language(message["content"]),
+                        message.get("language") or detect_language(message["content"]),
                     )
                 )
             except Exception:  # noqa: BLE001 - optional provider boundary
@@ -580,7 +573,7 @@ def _prepare_chat_image(
     try:
         image = Image.open(io.BytesIO(data))
         image.verify()
-    except Exception as exc:  # noqa: BLE001 - image decoder boundary
+    except Exception as exc:
         raise ValueError("Image file is invalid") from exc
     extension = ".png" if upload.type == "image/png" else ".jpg"
     storage_path = (

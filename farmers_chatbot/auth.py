@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from .config import (
     ACCESS_POLICY,
@@ -14,7 +15,7 @@ from .config import (
     AUTH_MODE,
 )
 
-GOOGLE_ISSUERS = {'accounts.google.com', 'https://accounts.google.com'}
+GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 
 @dataclass(frozen=True)
@@ -40,10 +41,10 @@ def identity_from_claims(claims: Mapping[str, Any]) -> UserIdentity:
     email_verified = claims.get("email_verified")
 
     if issuer not in GOOGLE_ISSUERS:
-        raise IdentityError('The identity was not issued by Google.')
+        raise IdentityError("The identity was not issued by Google.")
     if not issuer or not subject:
         raise IdentityError("Google identity is missing issuer or subject.")
-    if not email or email_verified not in {True, "true", "True", 1}:
+    if not email or email_verified not in {True, "true", "True"}:
         raise IdentityError("A verified Google email address is required.")
     if not access_allowed(email):
         raise IdentityError("This Google account is not allowed to access the pilot.")

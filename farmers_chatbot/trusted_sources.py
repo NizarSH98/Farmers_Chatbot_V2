@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -50,11 +50,15 @@ ALL_TRUSTED_DOMAINS = tuple(
 )
 
 DYNAMIC_OR_HIGH_RISK_PATTERNS = (
-    r"\b(today|now|current|latest|price|market|forecast|weather|alert|law|"
-    r"regulation|registered|banned|pesticide|dose|veterinary|disease outbreak|"
-    r"profit|cost|export|scientific evidence|research|study)\b",
-    r"(اليوم|حالياً|حاليًا|الأحدث|آخر|سعر|أسعار|السوق|الطقس|توقعات|"
-    r"تنبيه|قانون|مبيد|جرعة|بيطري|مرض|ربح|كلفة|تصدير|بحث|دراسة)",
+    (
+        r"\b(today|now|current|latest|price|market|forecast|weather|alert|law|"
+        r"regulation|registered|banned|pesticide|dose|veterinary|disease outbreak|"
+        r"profit|cost|export|scientific evidence|research|study)\b"
+    ),
+    (
+        r"(اليوم|حالياً|حاليًا|الأحدث|آخر|سعر|أسعار|السوق|الطقس|توقعات|"
+        r"تنبيه|قانون|مبيد|جرعة|بيطري|مرض|ربح|كلفة|تصدير|بحث|دراسة)"
+    ),
 )
 
 
@@ -84,19 +88,30 @@ class TrustedSearchResult:
         }
 
 
-def host_is_trusted(host: str, allowed_domains: tuple[str, ...] = ALL_TRUSTED_DOMAINS) -> bool:
+def host_is_trusted(
+    host: str, allowed_domains: tuple[str, ...] = ALL_TRUSTED_DOMAINS
+) -> bool:
     normalized = host.lower().strip(".")
-    return any(normalized == domain or normalized.endswith(f".{domain}") for domain in allowed_domains)
+    return any(
+        normalized == domain or normalized.endswith(f".{domain}")
+        for domain in allowed_domains
+    )
 
 
-def url_is_trusted(url: str, allowed_domains: tuple[str, ...] = ALL_TRUSTED_DOMAINS) -> bool:
+def url_is_trusted(
+    url: str, allowed_domains: tuple[str, ...] = ALL_TRUSTED_DOMAINS
+) -> bool:
     try:
         parsed = urlparse(url)
     except ValueError:
         return False
-    return parsed.scheme == "https" and bool(parsed.hostname) and host_is_trusted(
-        parsed.hostname or "",
-        allowed_domains,
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and host_is_trusted(
+            parsed.hostname or "",
+            allowed_domains,
+        )
     )
 
 
@@ -141,10 +156,12 @@ class TrustedSourceClient:
         self.timeout_seconds = timeout_seconds
 
     def search(self, query: str, category: str = "auto") -> TrustedSearchResult:
-        searched_at = datetime.now(timezone.utc).isoformat()
+        searched_at = datetime.now(UTC).isoformat()
         category = classify_source_group(query) if category == "auto" else category
         if category not in TRUSTED_SOURCE_GROUPS:
-            raise ValueError("Trusted source category must be local, science, or economic")
+            raise ValueError(
+                "Trusted source category must be local, science, or economic"
+            )
         if not self.enabled:
             return TrustedSearchResult(
                 available=False,
@@ -199,7 +216,9 @@ class TrustedSourceClient:
                 timeout=self.timeout_seconds,
             )
             if response.status_code != 200:
-                raise RuntimeError(f"Trusted search returned HTTP {response.status_code}")
+                raise RuntimeError(
+                    f"Trusted search returned HTTP {response.status_code}"
+                )
             data = response.json()
             message = data["choices"][0]["message"]
             citations = []
@@ -237,7 +256,14 @@ class TrustedSourceClient:
                 search_requests=search_requests,
                 warning=None if citations else "No trusted citation was returned.",
             )
-        except (requests.RequestException, KeyError, IndexError, TypeError, ValueError, RuntimeError):
+        except (
+            requests.RequestException,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ):
             return TrustedSearchResult(
                 available=True,
                 verified=False,

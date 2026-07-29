@@ -56,21 +56,20 @@ def _services() -> tuple[
         EvidenceStore(),
         TrustedSourceClient(
             os.getenv("OPENROUTER_API_KEY"),
-            enabled=os.getenv("ENABLE_TRUSTED_WEB_SEARCH", "false").lower()
-            == "true",
+            enabled=os.getenv("ENABLE_TRUSTED_WEB_SEARCH", "false").lower() == "true",
         ),
     )
 
 
 def _require_configuration() -> None:
-    database_url = os.getenv('DATABASE_URL', '')
+    database_url = os.getenv("DATABASE_URL", "")
     required = {
-        'DATABASE_URL': (
+        "DATABASE_URL": (
             database_url
-            if database_url.startswith(('postgres://', 'postgresql://'))
-            else ''
+            if database_url.startswith(("postgres://", "postgresql://"))
+            else ""
         ),
-        'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY', ''),
+        "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
         "META_APP_SECRET": META_APP_SECRET,
         "META_VERIFY_TOKEN": META_VERIFY_TOKEN,
         "META_ACCESS_TOKEN": META_ACCESS_TOKEN,
@@ -194,10 +193,12 @@ def _handle_command(
     command = text.strip().split(maxsplit=1)[0].lower()
     if command == "/help":
         return (
-            "Ask a farming, scientific, or rural-enterprise question naturally.\n"
-            "Commands: /new, /help, /mode, /feedback.\n"
-            "This is an internal pilot; verify urgent or high-risk advice with a "
-            "qualified local professional.",
+            (
+                "Ask a farming, scientific, or rural-enterprise question naturally.\n"
+                "Commands: /new, /help, /mode, /feedback.\n"
+                "This is an internal pilot; verify urgent or high-risk advice with a "
+                "qualified local professional."
+            ),
             conversation_id,
         )
     if command == "/new":

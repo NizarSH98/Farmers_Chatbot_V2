@@ -4,7 +4,7 @@ import zipfile
 import pytest
 from openpyxl import load_workbook
 
-import farmers_chatbot.auth as auth
+from farmers_chatbot import auth
 from farmers_chatbot.artifacts import ArtifactService
 from farmers_chatbot.auth import IdentityError, UserIdentity
 from farmers_chatbot.documents import DocumentService
@@ -145,4 +145,3 @@ def test_whatsapp_identifier_is_hmac_and_not_the_phone_number():
     assert raw_phone not in identity_hash
     assert identity_hash == hash_external_identity(raw_phone, "test-secret")
     assert identity_hash != hash_external_identity(raw_phone, "other-secret")
-

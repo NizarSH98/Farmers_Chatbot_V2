@@ -1,0 +1,4 @@
+target-version = "py312"
+
+[lint.per-file-ignores]
+"farmers_chatbot/streamlit_app.py" = ["SIM117"]

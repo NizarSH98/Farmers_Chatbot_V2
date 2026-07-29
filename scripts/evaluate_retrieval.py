@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,7 +53,7 @@ def evaluate(benchmark_path: Path, top_k: int) -> dict:
         }
     passed = sum(case["passed"] for case in case_results)
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "benchmark": str(benchmark_path),
         "top_k": top_k,
         "metric": "hit rate: at least one approved relevant item in top-k",
