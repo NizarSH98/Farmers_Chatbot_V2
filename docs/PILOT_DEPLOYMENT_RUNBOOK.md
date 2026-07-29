@@ -10,7 +10,8 @@ never Git, issue trackers, documents, or chat.
 
 ## 1. Current release state
 
-- Local branch: `pilot`.
+- Local and remote branch: `pilot`.
+- GitHub CI: passing compilation, Ruff, 36 tests, and retrieval evaluation.
 - Web entry point: `rag_chatbot.py`.
 - WhatsApp entry point: `whatsapp_api:app`.
 - Postgres migration: `migrations/001_pilot_schema.sql`.

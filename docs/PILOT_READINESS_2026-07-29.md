@@ -3,7 +3,7 @@
 Last updated: 2026-07-29
 
 Percentages separate software readiness from contractual achievement. They are
-based only on repository evidence and the local test reports available on this date.
+based only on repository evidence, local reports, and the green GitHub CI run available on this date.
 
 | Area | Done | Evidence | Remaining |
 |---|---:|---|---|
@@ -12,15 +12,15 @@ based only on repository evidence and the local test reports available on this d
 | Assistant, RAG, and trusted-source behavior | 86% | Versioned novice-oriented prompt, evidence ladder, project retrieval, trusted registry, bounded live-search fallback, risk checks, 30/30 bilingual retrieval | ESDU approval, connected-model scientific/economic/safety set, live citation audit |
 | Tools, artifacts, and local MCP | 90% | Bounded tools, DOCX/XLSX validators, formula protection, artifact quota, local stdio MCP | ESDU review of generated templates and MCP client smoke on frozen commit |
 | WhatsApp pilot code | 82% | FastAPI endpoints, signature and phone-ID checks, deduplication, HMAC identity, commands, quotas, splitting, mocked webhook tests | Render/Meta credentials and live Arabic/test-number end-to-end run |
-| Automated/local validation | 88% | 36/36 tests, lint, compile, 100% candidate retrieval, 3 ms local fallback median | Connected model/load test, two-hour availability, live auth/privacy gates |
-| Operational deployment | 20% | `pilot` branch, migrations, secrets templates, Render blueprint, rollback/runbook | Supabase, Google, Streamlit, Render, Meta setup; push/freeze; live release gates |
+| Automated/local validation | 90% | GitHub CI and local gates pass: 36/36 tests, lint, compile, 100% candidate retrieval, 3 ms local fallback median | Connected model/load test, two-hour availability, live auth/privacy gates |
+| Operational deployment | 30% | `pilot` branch is pushed with green CI; migrations, secrets templates, Render blueprint, rollback/runbook exist | Supabase, Google, Streamlit, Render, Meta setup and live release gates |
 
 ## Roll-up
 
 - **Local-only software completion: 89%.**
-- **Code/configuration readiness for deployment: 84%.**
-- **Operational deployment completion: 20%.**
-- **Full internal-pilot readiness: 68%.**
+- **Code/configuration readiness for deployment: 86%.**
+- **Operational deployment completion: 30%.**
+- **Full internal-pilot readiness: 70%.**
 - **Contractual achievement evidenced in this repository: 0%.**
 
 The contractual percentage remains zero because software and draft documents do not
@@ -36,4 +36,4 @@ may change that figure once reconciled by the logframe owner.
 4. No controlled two-hour availability result exists.
 5. No live two-account Google/Supabase privacy test exists.
 6. The Meta test-number channel has not been exercised end to end.
-7. The tested commit has not yet been frozen as a deployed version.
+7. Provider deployment versions, URLs, and rollback targets are not yet frozen after live gates.
