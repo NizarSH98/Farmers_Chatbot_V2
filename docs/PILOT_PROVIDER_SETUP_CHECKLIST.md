@@ -5,10 +5,11 @@ real credentials into GitHub files, issues, email, or chat.
 
 ## 1. Approvals and named owners
 
-- [ ] Confirm the organization that is responsible for pilot data.
+- [ ] Confirm the legal data controller and authority to use the RAISE, ESDU, and
+  AUB names; the current operational label is not proof of AUB approval.
 - [ ] Name a privacy contact and incident owner.
-- [ ] Have the bilingual agreement in `farmers_chatbot/legal.py` reviewed by the
-  institutional privacy/legal owner. Code review is not legal approval.
+- [ ] Review the four lifecycle policy files under `legal/` using
+  `docs/POLICY_APPROVAL_CHECKLIST.md`. Code review is not legal approval.
 - [ ] Confirm that the pilot accepts only public or non-sensitive agricultural
   material and invited adult/institutionally supervised testers.
 - [ ] Approve the 30-day retention period and the list of subprocessors: Google,
@@ -58,9 +59,13 @@ with no commits during the session, not an assumed auto-deploy toggle.
 - [ ] Register the exact local and deployed callback URLs ending in
   `/oauth2callback`.
 - [ ] Generate a long random Streamlit cookie secret and keep it in managed secrets.
-- [ ] For internal testing, set `ACCESS_POLICY=email_allowlist` and list the exact
-  tester emails. Keep `ADMIN_EMAILS` separate. Use `google_any` only after the
-  public-access, abuse, agreement, support, and privacy review.
+- [ ] Set `ACCESS_POLICY=google_any` for open registration by verified Google
+  accounts. Set one exact `ADMIN_EMAILS` value; never derive admin rights from an
+  email domain.
+- [ ] Publish the OAuth application and complete Google's public homepage,
+  privacy-policy, verified-domain, and branding checks. Because the operator does
+  not control `aub.edu.lb`, obtain an approved AUB/ESDU-hosted route or use an
+  approved project-owned domain before public production.
 
 ## 5. OpenRouter
 
@@ -82,12 +87,15 @@ with no commits during the session, not an assumed auto-deploy toggle.
   Postgres, Supabase Storage, OpenRouter, the privacy contact, or admin is missing.
 - [ ] Record app URL, commit SHA, prompt/knowledge version and migration version.
 - [ ] Check logs for errors but never print credentials or user message content.
+- [ ] Apply for Streamlit's nonprofit/education resource increase and run a real
+  20–30-user connected rehearsal. Use an approved paid container host if the free
+  service misses the latency, reliability, or memory gate.
 
 ## 7. Release gates
 
 - [ ] Complete Google login, agreement, logout, export, account deletion, retention,
   two-user isolation, private downloads, prompt injection, safety, artifact, Arabic,
-  five-user load, rollback and backup-restore checks.
+  20–30-user load, rollback and backup-restore checks.
 - [ ] Confirm no critical authentication, privacy, safety, or tool-permission issue.
 - [ ] Keep `pilot` open for improvements; promote only reviewed CI-passing commits
   to the frozen release branch outside a testing session.

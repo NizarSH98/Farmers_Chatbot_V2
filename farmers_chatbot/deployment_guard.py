@@ -10,6 +10,7 @@ from .config import (
     AGREEMENT_TEXT_VERSION,
     ALLOWED_DOMAINS,
     ALLOWED_EMAILS,
+    APP_DISPLAY_NAME,
     APP_ENV,
     APP_PUBLIC_URL,
     AUTH_MODE,
@@ -58,6 +59,8 @@ def validate_web_runtime() -> None:
         missing.append("OPENROUTER_API_KEY")
     if not ORGANIZATION_NAME:
         missing.append("ORGANIZATION_NAME")
+    if not APP_DISPLAY_NAME:
+        missing.append("APP_DISPLAY_NAME")
     if CONSENT_VERSION != AGREEMENT_TEXT_VERSION:
         missing.append(
             f"CONSENT_VERSION={AGREEMENT_TEXT_VERSION} (must match deployed text)"

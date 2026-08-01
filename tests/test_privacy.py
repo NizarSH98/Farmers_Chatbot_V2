@@ -2,7 +2,13 @@ import pytest
 
 from farmers_chatbot.auth import UserIdentity
 from farmers_chatbot.documents import DocumentService
-from farmers_chatbot.legal import agreement_markdown, agreement_markdown_ar
+from farmers_chatbot.legal import (
+    LEGAL_ROOT,
+    agreement_markdown,
+    agreement_markdown_ar,
+    privacy_policy_markdown,
+    privacy_policy_markdown_ar,
+)
 from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 
@@ -10,10 +16,32 @@ from farmers_chatbot.storage_backends import LocalPrivateStorage
 def test_versioned_notice_is_bilingual_and_names_processing_boundaries():
     english = agreement_markdown()
     arabic = agreement_markdown_ar()
-    assert "OpenRouter" in english
-    assert "Supabase" in english
+    privacy = privacy_policy_markdown()
+    privacy_ar = privacy_policy_markdown_ar()
+    assert "OpenRouter" in privacy
+    assert "Supabase" in privacy
     assert "delete your account" in english
-    assert "إشعار الخصوصية" in arabic
+    assert "project lifecycle" in english
+    assert "DRAFT" in english
+    assert "legal data controller" in privacy
+    assert "simultaneous users" not in privacy
+    assert "{{" not in f"{english}{arabic}{privacy}{privacy_ar}"
+    assert "الخصوصية" in privacy_ar
+    assert "الاستخدام" in arabic
+
+
+def test_lifecycle_legal_documents_are_reviewable_source_files():
+    expected = {
+        "USER_AGREEMENT.en.md",
+        "USER_AGREEMENT.ar.md",
+        "PRIVACY_POLICY.en.md",
+        "PRIVACY_POLICY.ar.md",
+    }
+    assert expected == {path.name for path in LEGAL_ROOT.glob("*.md")}
+    for filename in expected:
+        source = (LEGAL_ROOT / filename).read_text(encoding="utf-8")
+        assert "{{LEGAL_VERSION}}" in source
+        assert "DRAFT" in source or "مسودة" in source
 
 
 def test_user_can_export_and_delete_identity_and_private_content(tmp_path):

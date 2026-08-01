@@ -1,4 +1,4 @@
-"""Authenticated Streamlit workspace for the RAISE internal pilot."""
+"""Authenticated Streamlit workspace for the RAISE-ESDU project."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from PIL import Image
 from .artifacts import ArtifactService
 from .auth import IdentityError, UserIdentity, current_streamlit_identity
 from .config import (
+    APP_DISPLAY_NAME,
+    APP_PUBLIC_URL,
     AUTH_MODE,
     CONSENT_VERSION,
     MAX_CHAT_IMAGE_BYTES,
@@ -30,7 +32,12 @@ from .deployment_guard import validate_web_runtime
 from .documents import DocumentService
 from .knowledge import KnowledgeIndex
 from .language import detect_language
-from .legal import agreement_markdown, agreement_markdown_ar
+from .legal import (
+    agreement_markdown,
+    agreement_markdown_ar,
+    privacy_policy_markdown,
+    privacy_policy_markdown_ar,
+)
 from .llm import AssistantRequest, AssistantService
 from .pilot_store import PilotStore
 from .retention import purge_expired_content
@@ -48,7 +55,7 @@ CLARIFICATION_STYLES = {
 }
 
 
-@st.cache_resource(show_spinner="Preparing the bilingual pilot workspace…")
+@st.cache_resource(show_spinner="Preparing the bilingual workspace…")
 def get_services() -> tuple[
     KnowledgeIndex,
     PilotStore,
@@ -91,12 +98,56 @@ def _init_state() -> None:
             st.session_state[key] = value
 
 
+def _legal_url(document: str) -> str:
+    base = APP_PUBLIC_URL or ""
+    if not base:
+        return f"?legal={document}"
+    separator = "&" if "?" in base else "?"
+    return f"{base}{separator}legal={document}"
+
+
+def _render_public_legal(document: str) -> None:
+    if document == "privacy":
+        title = "Privacy Policy / سياسة الخصوصية"
+        english = privacy_policy_markdown()
+        arabic = privacy_policy_markdown_ar()
+    else:
+        title = "User Agreement / اتفاقية الاستخدام"
+        english = agreement_markdown()
+        arabic = agreement_markdown_ar()
+    st.subheader(title)
+    tab_en, tab_ar = st.tabs(["English", "العربية"])
+    with tab_en:
+        st.markdown(english)
+    with tab_ar:
+        st.markdown(arabic)
+
+
 def render_login() -> None:
-    st.title("🌿 RAISE Farmer Assistant")
-    st.subheader("ESDU internal pilot / النسخة التجريبية الداخلية")
+    st.title(f"🌿 {APP_DISPLAY_NAME}")
+    legal_view = str(st.query_params.get("legal") or "").strip().lower()
+    if legal_view in {"privacy", "terms"}:
+        _render_public_legal(legal_view)
+        st.markdown(f"[← Back to application]({APP_PUBLIC_URL or './'})")
+    else:
+        st.subheader("Accessible agricultural decision support / دعم زراعي مبسّط")
+        st.write(
+            "Ask agricultural, scientific, environmental, economic, and rural-"
+            "enterprise questions. The service can retrieve reviewed knowledge, "
+            "show sources, use bounded tools, and create practical artifacts."
+        )
+        st.info(
+            "AI answers can be wrong. Verify high-risk agricultural, veterinary, "
+            "food-safety, financial, engineering, and regulatory decisions with a "
+            "qualified professional. Submit only public or non-sensitive material."
+        )
+        st.markdown(
+            f"[Privacy Policy]({_legal_url('privacy')}) · "
+            f"[User Agreement]({_legal_url('terms')})"
+        )
     st.write(
-        "Sign in with a verified Google account to access your private pilot "
-        "workspace. No password is stored by this application."
+        "Sign in with a verified Google account to create a private workspace. "
+        "The application does not receive or store your Google password."
     )
     st.button(
         "Continue with Google",
@@ -106,18 +157,28 @@ def render_login() -> None:
     )
 
 
-def ensure_identity(store: PilotStore) -> tuple[UserIdentity, dict[str, Any]] | None:
+def public_identity() -> UserIdentity | None:
+    """Resolve identity before initializing private workspace services."""
+
     try:
         identity = current_streamlit_identity(st)
     except IdentityError as exc:
         st.error(str(exc))
         if AUTH_MODE == "google":
             st.button("Log out", on_click=st.logout)
-        st.stop()
         return None
     if identity is None:
         render_login()
-        st.stop()
+    return identity
+
+
+def ensure_identity(
+    store: PilotStore,
+    identity: UserIdentity | None = None,
+) -> tuple[UserIdentity, dict[str, Any]] | None:
+    if identity is None:
+        identity = public_identity()
+    if identity is None:
         return None
     user = store.upsert_user(identity)
     identity = replace(identity, user_id=user["id"])
@@ -130,18 +191,23 @@ def ensure_identity(store: PilotStore) -> tuple[UserIdentity, dict[str, Any]] | 
 def render_consent(identity: UserIdentity, store: PilotStore) -> None:
     if store.has_current_consent(identity.user_id):
         return
-    st.title("Pilot agreement / اتفاقية النسخة التجريبية")
+    st.title("User Agreement and Privacy Policy / الاتفاقية وسياسة الخصوصية")
     st.warning(
-        "Read both the user agreement and privacy notice before continuing. "
+        "Read both lifecycle documents before continuing. "
         "Use only public or non-sensitive agricultural information."
     )
     tab_en, tab_ar = st.tabs(["English", "العربية"])
     with tab_en:
         st.markdown(agreement_markdown())
+        st.divider()
+        st.markdown(privacy_policy_markdown())
     with tab_ar:
         st.markdown(agreement_markdown_ar())
+        st.divider()
+        st.markdown(privacy_policy_markdown_ar())
     accepted_terms = st.checkbox(
-        f"I have read and accept agreement version {CONSENT_VERSION}."
+        f"I accept the User Agreement and acknowledge the Privacy Policy, "
+        f"version {CONSENT_VERSION}."
     )
     accepted_processing = st.checkbox(
         "I understand that my questions and relevant context may be sent to the "
@@ -150,7 +216,13 @@ def render_consent(identity: UserIdentity, store: PilotStore) -> None:
     accepted_safety = st.checkbox(
         "I will not submit sensitive personal, confidential, or unauthorized data."
     )
-    accepted = accepted_terms and accepted_processing and accepted_safety
+    accepted_age = st.checkbox(
+        "I am at least 18, or I am using the service under approved adult or "
+        "institutional supervision."
+    )
+    accepted = (
+        accepted_terms and accepted_processing and accepted_safety and accepted_age
+    )
     if st.button("Accept and continue", type="primary", disabled=not accepted):
         store.accept_consent(identity.user_id)
         st.rerun()
@@ -182,18 +254,27 @@ def render_data_controls(
             f"Agreement {CONSENT_VERSION} · retention up to {RETENTION_DAYS} days · "
             f"contact {PRIVACY_CONTACT_EMAIL}"
         )
-        with st.popover("Read agreement / اقرأ الاتفاقية"):
+        with st.popover("Read legal documents / اقرأ المستندات القانونية"):
             language = st.radio(
-                "Agreement language",
+                "Document language",
                 ["English", "العربية"],
                 horizontal=True,
                 label_visibility="collapsed",
             )
-            st.markdown(
-                agreement_markdown()
-                if language == "English"
-                else agreement_markdown_ar()
+            document = st.radio(
+                "Document",
+                ["User Agreement", "Privacy Policy"],
+                horizontal=True,
             )
+            if language == "English" and document == "User Agreement":
+                content = agreement_markdown()
+            elif language == "English":
+                content = privacy_policy_markdown()
+            elif document == "User Agreement":
+                content = agreement_markdown_ar()
+            else:
+                content = privacy_policy_markdown_ar()
+            st.markdown(content)
         export_json = json.dumps(
             store.export_user_data(identity.user_id),
             ensure_ascii=False,
@@ -203,7 +284,7 @@ def render_data_controls(
         st.download_button(
             "Download my workspace data (JSON)",
             data=export_json,
-            file_name="raise-pilot-my-data.json",
+            file_name="raise-esdu-my-data.json",
             mime="application/json",
             use_container_width=True,
         )
@@ -716,14 +797,18 @@ def _prepare_chat_image(
 
 def main() -> None:
     st.set_page_config(
-        page_title="RAISE ESDU Farmer Assistant",
+        page_title=APP_DISPLAY_NAME,
         page_icon="🌿",
         layout="wide",
         initial_sidebar_state="expanded",
     )
     _init_state()
+    validate_web_runtime()
+    identity = public_identity()
+    if identity is None:
+        return
     knowledge, store, storage, trusted_client = get_services()
-    identity_result = ensure_identity(store)
+    identity_result = ensure_identity(store, identity)
     if not identity_result:
         return
     identity, user = identity_result
@@ -735,13 +820,13 @@ def main() -> None:
         storage,
     )
 
-    st.title("🌿 RAISE Farmer Assistant")
+    st.title(f"🌿 {APP_DISPLAY_NAME}")
     st.markdown(
         "**Akkar and rural Lebanon · عكار وريف لبنان**  \n"
         "Locally grounded agricultural, scientific, and rural-enterprise support."
     )
     st.info(
-        "Internal pilot: verify high-risk agronomic, pesticide, veterinary, "
+        "Decision support: verify high-risk agronomic, pesticide, veterinary, "
         "food-safety, financial, water-quality, and engineering decisions with a "
         "qualified local expert."
     )
