@@ -1,0 +1,167 @@
+[
+  {
+    "id": "ESDU-ABOUT-2026",
+    "title": "About ESDU",
+    "publisher": "American University of Beirut, Environment and Sustainable Development Unit",
+    "url": "https://aub.edu.lb/fafs/esdu/Pages/About-ESDU.aspx",
+    "source_class": "A",
+    "geography": ["Lebanon", "regional"],
+    "topics": ["ESDU", "rural livelihoods", "smallholders", "women", "youth", "capacity building"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-AI-2025",
+    "title": "ESDU Food Security and AI Initiative",
+    "publisher": "American University of Beirut",
+    "url": "https://www.aub.edu.lb/fafs/news/Pages/2025_ExploringSustainabilityandInnovationinLebanonESDULaunchestheFoodSecurityandAIInitiative.aspx",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["ESDU", "artificial intelligence", "food security", "entrepreneurship"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-AKKAR-VALUECHAINS",
+    "title": "Value Chains for Improved Socioeconomic Well-being of Syrian Refugees and Lebanese Host Communities",
+    "publisher": "American University of Beirut, ESDU",
+    "url": "https://www.aub.edu.lb/fafs/esdu/Pages/vcproject.aspx",
+    "source_class": "A",
+    "geography": ["Akkar", "Danniyeh", "North Lebanon"],
+    "topics": ["zaatar", "coriander", "dairy", "small ruminants", "hydroponic feed", "market assessment"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-CLIMAT-AKKAR",
+    "title": "ESDU/WFP climate-resilient livestock and rural livelihoods work in Akkar",
+    "publisher": "American University of Beirut, ESDU",
+    "url": "https://www.aub.edu.lb/fafs/esdu/Documents/ToR_ESDU_Community%20mobilizer_WFP_Akkar%20.pdf",
+    "source_class": "A",
+    "geography": ["Akkar", "Hasbaya", "Baalbek"],
+    "topics": ["livestock", "grazing", "sprouting units", "composting", "rainwater harvesting", "renewable energy", "living labs"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-ARDI-ARDAK",
+    "title": "Ardi Ardak National Food Security Initiative",
+    "publisher": "American University of Beirut, ESDU",
+    "url": "https://www.aub.edu.lb/fafs/esdu/Pages/ardiardakinitiative.aspx",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["smallholders", "rural women", "community kitchens", "markets", "knowledge sharing"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-RELEAF",
+    "title": "RE-LEAF legume value-chain project",
+    "publisher": "American University of Beirut, ESDU",
+    "url": "https://www.aub.edu.lb/fafs/esdu/Pages/RE-LEAF.aspx",
+    "source_class": "A",
+    "geography": ["North Lebanon", "Mount Lebanon"],
+    "topics": ["legumes", "smallholders", "agribusiness", "employment", "markets", "capacity building"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "ESDU-FARMING-FOR-ALL",
+    "title": "Farming For All: Introduction to Sustainable Agriculture",
+    "publisher": "American University of Beirut Continuing Education Center and ESDU",
+    "url": "https://www.aub.edu.lb/cec/Pages/Farming-For-All.aspx",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["small-scale farming", "soil", "water", "crops", "livestock", "post-harvest", "waste", "marketing"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "MOA-AKKAR-2026",
+    "title": "Akkar potato season and agricultural production overview, April 2026",
+    "publisher": "Lebanese Ministry of Agriculture",
+    "url": "https://www.agriculture.gov.lb/Media/News/2026/%D9%88%D8%B2%D9%8A%D8%B1-%D8%A7%D9%84%D8%B2%D8%B1%D8%A7%D8%B9%D8%A9-%D9%86%D8%B2%D8%A7%D8%B1-%D9%87%D8%A7%D9%86%D9%8A-%D9%8A%D8%B7%D9%84%D9%82-%D9%85%D9%86-%D8%B9%D9%83%D8%A7%D8%B1-%D9%85%D9%88%D8%B3%D9%85-%D8%A7%D9%84%D8%A8%D8%B7%D8%A7%D8%B7%D8%A7-2",
+    "source_class": "A",
+    "geography": ["Akkar"],
+    "topics": ["potatoes", "pome fruit", "olives", "citrus", "avocado", "value chains"],
+    "accessed": "2026-07-29",
+    "time_sensitive": true
+  },
+  {
+    "id": "MOA-AKKAR-GREENHOUSE-2026",
+    "title": "Ministry monitoring of greenhouse and potato production in Akkar, March 2026",
+    "publisher": "Lebanese Ministry of Agriculture",
+    "url": "https://www.agriculture.gov.lb/Media/News/2026/%D9%88%D8%B2%D8%A7%D8%B1%D8%A9-%D8%A7%D9%84%D8%B2%D8%B1%D8%A7%D8%B9%D8%A9-%D8%AA%D8%B1%D8%B5%D8%AF-%D8%AA%D8%B7%D9%88%D8%B1-%D8%A7%D9%84%D8%A7%D9%86%D8%AA%D8%A7%D8%AC-%D8%A7%D9%84%D8%B2%D8%B1%D8%A7%D8%B9%D9%8A-%D9%81%D9%8A-%D8%B9%D9%83%D8%A7%D8%B1-%D8%B2%D9%8A",
+    "source_class": "A",
+    "geography": ["Akkar"],
+    "topics": ["greenhouses", "tomatoes", "cucumbers", "potatoes", "markets"],
+    "accessed": "2026-07-29",
+    "time_sensitive": true
+  },
+  {
+    "id": "UNDP-LEBANON-NAP-2025",
+    "title": "Lebanon National Adaptation Plan 2025–2035",
+    "publisher": "Lebanese Ministry of Environment and UNDP Lebanon",
+    "url": "https://www.undp.org/lebanon/publications/lebanon-national-adaptation-plan-nap",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["climate adaptation", "agriculture", "water", "governance", "monitoring"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "UNDP-IRRIGATION-AKKAR",
+    "title": "Support to host communities through irrigation and water-saving infrastructure",
+    "publisher": "UNDP Lebanon",
+    "url": "https://www.undp.org/lebanon/projects/support-host-communities-wash-sector",
+    "source_class": "A",
+    "geography": ["Akkar", "Lebanon"],
+    "topics": ["irrigation", "water scarcity", "rainwater harvesting", "canals", "hill lakes"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "FAO-LEBANON-RESILIENT-LIVELIHOODS",
+    "title": "Lebanon Plan of Action for Resilient Livelihoods",
+    "publisher": "Food and Agriculture Organization of the United Nations",
+    "url": "https://www.fao.org/fileadmin/user_upload/emergencies/docs/Lebanon%20Plan%20of%20Action%20for%20Resilient%20Livelihoods%202014-2018.pdf",
+    "source_class": "A",
+    "geography": ["Akkar", "Lebanon"],
+    "topics": ["rural livelihoods", "mixed farming", "smallholders", "agricultural systems"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "FAO-LEBANON-PESTICIDE-CHILD-SAFETY",
+    "title": "Protect Children from Pesticides guide released in Arabic",
+    "publisher": "Food and Agriculture Organization of the United Nations, Lebanon",
+    "url": "https://www.fao.org/lebanon/news/detail/FAO-releases-Protect-Children-from-Pesticides%21-Guide-in-Arabic/en",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["pesticides", "children", "workers", "occupational safety", "Arabic"],
+    "accessed": "2026-07-29"
+  },
+  {
+    "id": "MOA-REGISTERED-PESTICIDES-2026",
+    "title": "Current list of registered agricultural pesticides",
+    "publisher": "Lebanese Ministry of Agriculture",
+    "url": "https://www.agriculture.gov.lb/Subjects/Plant-Resources/Plant-Pharmacy/%D8%A7%D9%84%D8%A7%D8%AF%D9%88%D9%8A%D8%A9-%D8%A7%D9%84%D8%B2%D8%B1%D8%A7%D8%B9%D9%8A%D8%A9-%D8%A7%D9%84%D9%85%D8%B3%D9%85%D9%88%D8%AD%D8%A9",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["pesticides", "registration", "plant protection", "regulation"],
+    "accessed": "2026-07-29",
+    "time_sensitive": true
+  },
+  {
+    "id": "MOA-BANNED-PESTICIDES-2026",
+    "title": "Current Ministry route for banned agricultural pesticides",
+    "publisher": "Lebanese Ministry of Agriculture",
+    "url": "https://www.agriculture.gov.lb/Subjects/Plant-Resources/Plant-Pharmacy/Banned-Pesticides",
+    "source_class": "A",
+    "geography": ["Lebanon"],
+    "topics": ["pesticides", "banned products", "plant protection", "regulation"],
+    "accessed": "2026-07-29",
+    "time_sensitive": true
+  },
+  {
+    "id": "MOA-EXTENSION-CENTERS",
+    "title": "Ministry of Agriculture extension centers list",
+    "publisher": "Lebanese Ministry of Agriculture",
+    "url": "https://www.agriculture.gov.lb/Subjects/Education-and-Extension/Extension-and-Library/centers-list",
+    "source_class": "A",
+    "geography": ["Akkar", "Lebanon"],
+    "topics": ["extension", "referral", "farmer support", "government services"],
+    "accessed": "2026-07-29",
+    "time_sensitive": true
+  }
+]

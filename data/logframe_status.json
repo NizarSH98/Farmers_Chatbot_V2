@@ -1,0 +1,66 @@
+{
+  "updated": "2026-07-29",
+  "source": "RAISE_Logframe_final.xlsx",
+  "activities": [
+    {
+      "id": "A.1.1.1",
+      "name": "System Architecture Refinement",
+      "build_readiness_percent": 75,
+      "contractual_achievement_percent": 0,
+      "target": "90% priority tests; median <=10s; >=95% controlled availability; >=80% retrieval relevance",
+      "evidence_status": "clean Python 3.12 install; 18 tests and lint pass; candidate bilingual retrieval benchmark 100%; local fallback latency benchmark passes; Streamlit health and MCP integration pass; connected latency and controlled availability pending"
+    },
+    {
+      "id": "A.1.1.2",
+      "name": "Governance and Validation Framework Development",
+      "build_readiness_percent": 70,
+      "contractual_achievement_percent": 0,
+      "target": "At least 3 governance and validation methodologies",
+      "evidence_status": "three draft methodologies; approval minutes missing"
+    },
+    {
+      "id": "A.1.1.3",
+      "name": "Stakeholder Identification and Field Alignment",
+      "build_readiness_percent": 15,
+      "contractual_achievement_percent": 0,
+      "target": "40-50 stakeholders enrolled",
+      "current_count": 0,
+      "evidence_status": "no controlled outreach record in repository"
+    },
+    {
+      "id": "A.1.2.1",
+      "name": "System Deployment",
+      "build_readiness_percent": 30,
+      "contractual_achievement_percent": 0,
+      "target": "40-50 stakeholders try the model",
+      "current_count": 0,
+      "evidence_status": "deployable web build and channel interface exist; no qualifying deployment participation record"
+    },
+    {
+      "id": "A.1.2.2",
+      "name": "Field Testing of the AI System",
+      "build_readiness_percent": 20,
+      "contractual_achievement_percent": 0,
+      "target": "At least 4 feedback sessions",
+      "current_count": 0,
+      "evidence_status": "session method and event template drafted; no event log"
+    },
+    {
+      "id": "A.1.2.3",
+      "name": "Iterative System Improvement",
+      "build_readiness_percent": 30,
+      "contractual_achievement_percent": null,
+      "target": "At least 80% of validated high-priority feedback resolved",
+      "evidence_status": "consent-aware feedback store and summary implemented; no validated feedback denominator"
+    },
+    {
+      "id": "A.1.2.4",
+      "name": "System Performance Evaluation",
+      "build_readiness_percent": 35,
+      "contractual_achievement_percent": 0,
+      "target": "1 RRO",
+      "current_count": 0,
+      "evidence_status": "RRO working draft and replication outline exist; pilot evidence and approval missing"
+    }
+  ]
+}

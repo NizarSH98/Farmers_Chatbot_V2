@@ -1,215 +1,205 @@
-# Lebanese Agricultural Guide RAG Chatbot
+# RAISE Akkar Farmer Assistant
 
-A Retrieval-Augmented Generation (RAG) chatbot that provides expert agricultural advice for Lebanese farming practices with **local** voice capabilities - no API keys required for voice features!
+Arabic-first, bilingual agricultural decision support for farmers and agri-food stakeholders in Akkar and rural Lebanon.
 
-## Features
+The project combines:
 
-### 🤖 AI-Powered Responses
-- **Multi-language Support**: Automatically detects and responds in Arabic or English
-- **Multiple LLM Options**: Choose from GPT-3.5/4, Claude, Llama, Mistral models
-- **RAG Technology**: Retrieves relevant information from Lebanese Agricultural Guide PDF
+- a source-traceable Akkar and ESDU knowledge base;
+- an authenticated Streamlit workspace with persistent chats and projects;
+- Google OIDC, Supabase Postgres/private storage, and local SQLite fallbacks;
+- Quick, Standard, Deep, and Source-only answer modes;
+- risk-based internal retrieval, trusted live search, and bounded tool calling;
+- a local MCP server;
+- a signed Meta WhatsApp test-number webhook service;
+- optional local Whisper speech-to-text;
+- consent-aware feedback and performance evidence;
+- direct traceability to `RAISE_Logframe_final.xlsx`.
 
-### 🎤 Local Voice Input (Speech-to-Text)
-- **Real-time Recording**: Record questions directly in the browser
-- **Multi-language Recognition**: Supports both Arabic and English speech
-- **Powered by OpenAI Whisper**: Industry-leading speech recognition accuracy
-- **100% Local**: No internet connection required for voice processing
+> **Pilot status:** The software and strengthened knowledge base are under internal review. The knowledge base is not an official ESDU publication until ESDU approves its content, Arabic field language, title, and publication status.
 
-### 🔊 Local Voice Output (Text-to-Speech)
-- **Human-like Voices**: High-quality, natural-sounding speech synthesis
-- **Language-Aware**: Automatically selects appropriate voice for Arabic or English
-- **Powered by XTTS-v2**: State-of-the-art local voice generation technology
-- **No API Keys**: Completely offline voice synthesis
+## Why this exists
 
-### 🌐 Bilingual Interface
-- **Complete Arabic/English Support**: All UI elements in both languages
-- **Smart Language Detection**: Automatically adapts interface based on query language
-- **Cultural Sensitivity**: Proper Arabic text rendering and layout
+The goal is to make useful agricultural knowledge easier to access for Lebanese farmers, starting with Akkar. A strong answer must be more than fluent: it should fit the farmer's locality and production system, expose its sources and limitations, support Arabic use, learn from field feedback, and avoid pretending that fast-changing prices, weather, alerts, or regulations are static facts.
 
-## Installation
+## Current capabilities
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Farmers_Chatbot_V2
-   ```
+- 21 bilingual Akkar-focused knowledge items with stable IDs and institutional sources.
+- Hybrid word/character retrieval in English and Arabic.
+- Source cards showing knowledge ID, evidence class, review status, risk class, and source links.
+- Current mode profiles:
+  - **Quick:** low-cost, short response.
+  - **Standard:** default balance.
+  - **Deep:** more retrieval, reasoning effort, and tool rounds.
+  - **Source only:** no general model knowledge.
+- Persistent, ownership-checked conversations, projects, uploads, artifacts,
+  feedback, quotas, and 30-day retention.
+- Safe internal tools include:
+  - `search_knowledge`
+  - `search_project_knowledge`
+  - `search_trusted_sources`
+  - `get_verified_source`
+  - `calculate_enterprise_budget`
+  - `convert_agricultural_units`
+  - deterministic action plan, checklist, crop calendar, and referral artifacts
+  - `get_source`
+  - `get_logframe_status`
+  - `record_feedback` with explicit consent
+- Local-stdio MCP server exposing bounded knowledge, source, conversion, artifact,
+  logframe, and feedback tools without shell or arbitrary URL access.
+- FastAPI WhatsApp pilot adapter with signature/phone-ID verification,
+  deduplication, HMAC identities, commands, and shared quotas.
+- Online Edge TTS with explicit disclosure.
+- Optional local Whisper input when the voice dependencies are installed.
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Knowledge structure
 
-3. **Set up API key (only for LLM responses)**
-   Create a `.env` file in the project root with:
-   ```env
-   # OpenRouter API Key for LLM responses (required)
-   OPENROUTER_API_KEY=your_openrouter_api_key_here
-   ```
+The editable knowledge source is:
 
-4. **Add the Agricultural Guide PDF**
-   Place `Agricultural Guide for Lebanon.pdf` in the project root directory.
-
-5. **Run the application**
-   ```bash
-   streamlit run rag_chatbot.py
-   ```
-
-## Local Voice Setup
-
-### Automatic Installation
-The voice models will be automatically downloaded and loaded when you first use the voice features:
-
-- **XTTS-v2**: ~2GB download for text-to-speech
-- **Whisper Base**: ~290MB download for speech-to-text
-
-### Manual Installation (Optional)
-If you want to pre-install the voice models:
-
-```bash
-# For Text-to-Speech
-python -c "from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2')"
-
-# For Speech-to-Text  
-python -c "import whisper; whisper.load_model('base')"
+```text
+knowledge_base/
+├── guide.json       # bilingual reviewed-item candidates
+├── sources.json     # source register
+└── README.md        # review rules
 ```
 
-## API Keys Setup
+`scripts/build_guide.py` renders the structured source into
+`knowledge_base/RAISE_Akkar_Agricultural_Guide.md` for internal review.
 
-### OpenRouter API Key (Required for LLM responses)
-1. Visit [OpenRouter.ai](https://openrouter.ai/)
-2. Sign up for an account
-3. Navigate to API Keys section
-4. Generate a new API key
-5. Add to your `.env` file
+The legacy `Agricultural Guide for Lebanon.pdf` remains for migration and comparison. The application now retrieves from the structured knowledge base so claims can be reviewed, versioned, and retired individually.
 
-**Note**: Voice features work completely offline and don't require any API keys!
+The initial expansion covers:
 
-## Usage
+- Akkar plain versus upland/terraced contexts;
+- dated Ministry of Agriculture production signals;
+- potato, greenhouse, orchard, water, soil, livestock, post-harvest, and market decision checklists;
+- ESDU's participatory-development and living-lab approach;
+- ESDU work on livestock resilience, sprouting units, composting, rainwater harvesting, zaatar/coriander, dairy, rural women, community-market links, and legumes;
+- safety boundaries and expert escalation;
+- dynamic information that must come from a timestamped tool.
 
-### Text Input
-1. Type your question in Arabic or English in the text input field
-2. The chatbot will automatically detect the language and respond accordingly
+All knowledge items are currently `draft`. Technical and field-language approval is still required.
 
-### Voice Input (Local)
-1. Click the "Record / تسجيل" button
-2. Speak your question clearly
-3. The system will transcribe your speech locally using Whisper
-4. No internet connection required for transcription
+## Local setup
 
-### Voice Output (Local)
-1. After receiving a text response, click "🔊 Listen / استمع"
-2. The system will generate natural speech locally using XTTS-v2
-3. Audio will play automatically with playback controls
-4. No internet connection required for speech generation
+Use Python 3.12:
 
-## Technical Architecture
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+streamlit run rag_chatbot.py
+```
 
-### RAG Pipeline
-1. **Document Ingestion**: Extract text from PDF and split into chunks
-2. **Vectorization**: Create TF-IDF embeddings for semantic search
-3. **Retrieval**: Find most relevant document chunks based on query
-4. **Generation**: Send retrieved context + query to LLM for comprehensive answers
-5. **Local Voice Processing**: Convert between speech and text using local models
+Add a deployment-specific OpenRouter key to `.env` if connected generation is required:
 
-### Local Voice Technologies
-- **Speech-to-Text**: OpenAI Whisper (local) for accurate transcription
-- **Text-to-Speech**: XTTS-v2 (local) for human-like voice synthesis
-- **Language Detection**: Unicode-based Arabic/English detection
-- **Audio Processing**: Real-time browser-based recording and playback
+```env
+OPENROUTER_API_KEY=your_key_here
+```
 
-## Supported Languages
+Without a key, the app remains usable as a retrieval interface and clearly labels that fallback.
 
-- **Arabic**: Full support including various dialects
-- **English**: Complete support with natural pronunciation
+## Voice options
 
-## Model Options
+Voice boundaries are explicit:
 
-### LLM Models (via OpenRouter - requires API key)
-- GPT-3.5 Turbo
-- GPT-4o
-- Claude 3 (Haiku, Sonnet, Opus)
-- Llama 3 70B
-- Mistral Large
+- Browser recording plus Whisper can run locally after installing `requirements-voice.txt`.
+- Edge TTS is an **online** service and sends answer text to Microsoft to generate audio.
+- The app does not claim that Edge TTS is offline.
 
-### Local Voice Models (no API keys required)
-- **Arabic TTS**: XTTS-v2 multilingual voices optimized for Arabic
-- **English TTS**: High-quality English voices with natural intonation
-- **STT**: OpenAI Whisper with automatic language detection
+Install optional local transcription:
 
-## Configuration Options
+```powershell
+python -m pip install -r requirements-voice.txt
+```
 
-### Sidebar Controls
-- **Model Selection**: Choose your preferred LLM
-- **Temperature**: Adjust creativity (0.0 = focused, 1.0 = creative)
-- **Response Length**: Control maximum response length (300-1500 tokens)
+The first Whisper use downloads the selected model. Configure `WHISPER_MODEL` in `.env`.
 
-## System Requirements
+## MCP
 
-### Minimum Requirements
-- **RAM**: 4GB (8GB recommended)
-- **Storage**: 3GB free space for voice models
-- **CPU**: Modern multi-core processor
-- **Internet**: Required only for LLM responses, not for voice features
+The official MCP Python SDK is constrained to the current stable v1 line:
 
-### Recommended Requirements
-- **RAM**: 8GB or more
-- **GPU**: NVIDIA GPU with 4GB+ VRAM (optional, for faster processing)
-- **Storage**: 5GB free space
-- **Internet**: Stable connection for LLM API calls
+```powershell
+python mcp_server.py
+```
 
-## Troubleshooting
+The default transport is `stdio`. Available tools:
 
-### Common Issues
+- `search_knowledge`
+- `get_source`
+- `get_verified_source`
+- `search_project_knowledge`
+- `search_trusted_sources`
+- `convert_agricultural_units`
+- `generate_farm_action_plan`
+- `generate_inspection_checklist`
+- `generate_crop_calendar`
+- `generate_expert_referral_brief`
+- `get_logframe_status`
+- `record_feedback`
 
-1. **Voice models not loading**
-   - Ensure sufficient disk space (3GB+)
-   - Check internet connection for initial model download
-   - Restart the application if models fail to load
+The server deliberately does not expose shell execution, arbitrary filesystem access, unrestricted URL fetching, or generic database queries. Do not publish an unauthenticated HTTP transport.
 
-2. **Audio not recording**
-   - Ensure microphone permissions are granted
-   - Check browser compatibility (Chrome/Firefox recommended)
+## Tests and logframe retrieval gate
 
-3. **LLM API errors**
-   - Verify OpenRouter API key is correctly set in `.env` file
-   - Check API key validity and quotas
+Install development dependencies and run:
 
-4. **PDF not loading**
-   - Ensure `Agricultural Guide for Lebanon.pdf` is in the project root
-   - Check file permissions and format
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python scripts/evaluate_retrieval.py
+```
 
-### Performance Tips
-- **GPU Acceleration**: If you have an NVIDIA GPU, the voice models will automatically use it for faster processing
-- **Model Size**: The current setup uses balanced models (Whisper Base, XTTS-v2). For faster processing on lower-end hardware, you can modify the code to use smaller models
-- **Memory Management**: Close other applications if you experience memory issues
+The retrieval evaluator writes a generated report under `reports/generated/`. The included 30-question bilingual set is a candidate benchmark. Its results do not become contractual evidence until the project team approves the questions and relevance labels.
 
-## Privacy & Security
+## Logframe and governance documents
 
-- **Local Voice Processing**: All voice features work completely offline
-- **No Voice Data Transmission**: Your voice recordings never leave your computer
-- **API Usage**: Only text queries are sent to LLM APIs, never audio data
+- `docs/LOGFRAME_TRACEABILITY.md`
+- `docs/GOVERNANCE_AND_VALIDATION.md`
+- `docs/INTERNAL_REVIEW.md`
+- `docs/ARCHITECTURE.md`
+- `docs/FIELD_SESSION_TEMPLATE.md`
+- `docs/ESDU_INTERNAL_KNOWLEDGE_INTAKE.md`
+- `docs/STAKEHOLDER_TRACKER_SCHEMA.md`
+- `docs/RRO.md`
+- `docs/DEPLOYMENT.md`
+- `docs/PILOT_DEPLOYMENT_RUNBOOK.md`
+- `docs/PILOT_PROVIDER_SETUP_CHECKLIST.md`
+- `docs/DATA_PORTABILITY.md`
+- `docs/POLICY_APPROVAL_CHECKLIST.md`
+- `docs/PILOT_READINESS_2026-07-29.md`
+- `docs/PILOT_READINESS_2026-08-01.md`
+- `docs/SOURCE_DOCUMENT_INTAKE.md`
 
-## Contributing
+Software metrics and contractual achievement are reported separately. Code cannot substitute for 40–50 stakeholder records, four feedback sessions, or approval of the final RRO.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+## Deployment
+
+The first internal deployment target is Streamlit Community Cloud with Google OIDC
+and portable PostgreSQL/private object storage currently supplied by Supabase,
+followed by the optional Render/Meta test-number service only after web gates pass.
+Use `docs/PILOT_DEPLOYMENT_RUNBOOK.md` for owner setup, managed secrets,
+20–30-user rehearsal gates, freeze, rollback, and WhatsApp verification. The
+contractual workbook is local evidence and is deliberately excluded from deployed
+runtime source.
+Continue development on `pilot`; deploy Streamlit from the protected
+`release/pilot-2026-08` branch so Community Cloud's automatic GitHub updates cannot
+change the frozen test build.
+
+## Safety and privacy
+
+The assistant is decision support, not a substitute for an agronomist, veterinarian, laboratory, engineer, food-safety professional, or competent authority. It must not invent pesticide/veterinary instructions, current alerts, market prices, or regulations.
+
+Connected generation sends the farmer's text, recent conversation context, and retrieved passages to the configured model provider. Online TTS sends answer text to its provider. Do not collect names, phone numbers, precise personal location, or other personal data unless an approved pilot process requires it and obtains informed consent.
+
+The web and WhatsApp channels enforce a versioned lifecycle-wide user agreement
+and privacy policy before normal use. Both documents are also readable before web
+sign-in.
+Users can export active workspace data and delete their account/private content.
+The agreement is an operational template and still requires institutional
+privacy/legal approval before public or production use.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- **Coqui AI**: For XTTS-v2 text-to-speech technology
-- **OpenAI**: For Whisper speech-to-text capabilities
-- **OpenRouter**: For access to multiple LLM providers
-- **Streamlit**: For the web application framework
-
-## Author
-
-**Nizar Shehayeb**
-
-For questions or support, please open an issue in the repository. 
+The software is available under the MIT License. Knowledge-source copyrights and the right to use ESDU/AUB names or branding remain separate and must be reviewed before publication.
