@@ -1,4 +1,5 @@
 import io
+import time
 import zipfile
 
 import pytest
@@ -38,6 +39,9 @@ def test_verified_google_identity_and_authorization_policies(monkeypatch):
 
     with pytest.raises(IdentityError):
         auth.identity_from_claims({**claims, "email_verified": False})
+
+    with pytest.raises(IdentityError, match="session expired"):
+        auth.identity_from_claims({**claims, "exp": int(time.time()) - 60})
 
     monkeypatch.setattr(auth, "ACCESS_POLICY", "domain_allowlist")
     monkeypatch.setattr(auth, "ALLOWED_DOMAINS", frozenset({"aub.edu.lb"}))

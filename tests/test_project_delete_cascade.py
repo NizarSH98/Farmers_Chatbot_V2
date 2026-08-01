@@ -20,6 +20,19 @@ def test_project_deletion_removes_artifact_record_and_private_path(tmp_path):
         )
     )
     project_id = store.create_project(user["id"], "Project")
+    conversation_id = store.create_conversation(
+        user["id"], project_id=project_id
+    )
+    image_path = (
+        f"users/{user['id']}/conversations/{conversation_id}/images/field.jpg"
+    )
+    store.add_message(
+        user["id"],
+        conversation_id,
+        role="user",
+        content="Keep this chat after project deletion",
+        attachments=[{"kind": "image", "storage_path": image_path}],
+    )
     artifact = ArtifactService(
         store,
         storage,
@@ -33,5 +46,7 @@ def test_project_deletion_removes_artifact_record_and_private_path(tmp_path):
 
     paths = store.delete_project(user["id"], project_id)
     assert paths
+    assert image_path not in paths
+    assert store.get_conversation(user["id"], conversation_id)["project_id"] is None
     with pytest.raises(ValueError):
         store.get_artifact(user["id"], artifact["artifact_id"])

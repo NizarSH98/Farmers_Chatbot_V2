@@ -232,8 +232,16 @@ class DocumentService:
         project_id: str,
         document_id: str,
     ) -> None:
-        path = self.store.delete_document(owner_user_id, project_id, document_id)
+        documents = self.store.list_documents(owner_user_id, project_id)
+        document = next(
+            (item for item in documents if item["id"] == document_id),
+            None,
+        )
+        if not document:
+            raise ValueError("Document not found")
+        path = str(document["storage_path"])
         self.storage.delete(path)
+        self.store.delete_document(owner_user_id, project_id, document_id)
 
 
 def search_project_chunks(

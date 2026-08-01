@@ -89,6 +89,11 @@ def test_webhook_verification_signature_dedup_and_private_identity(
     assert response.status_code == 202
     assert response.json()["queued"] == 1
     assert sent and sent[0][0] == "96170123456"
+    assert "Reply AGREE" in sent[0][1]
+    with pilot_store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()[
+            "n"
+        ] == 0
 
     duplicate = client.post(
         "/webhooks/whatsapp",
@@ -101,12 +106,48 @@ def test_webhook_verification_signature_dedup_and_private_identity(
     assert duplicate.status_code == 202
     assert duplicate.json()["duplicates"] == 1
 
+    payload["entry"][0]["changes"][0]["value"]["messages"][0].update(
+        {"id": "wamid.agree", "text": {"body": "AGREE"}}
+    )
+    agree_body, agree_signature = _signed_body(payload, "app-secret")
+    agree = client.post(
+        "/webhooks/whatsapp",
+        content=agree_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": agree_signature,
+        },
+    )
+    assert agree.status_code == 202
+
+    payload["entry"][0]["changes"][0]["value"]["messages"][0].update(
+        {"id": "wamid.help", "text": {"body": "/help"}}
+    )
+    help_body, help_signature = _signed_body(payload, "app-secret")
+    help_response = client.post(
+        "/webhooks/whatsapp",
+        content=help_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": help_signature,
+        },
+    )
+    assert help_response.status_code == 202
+
     with pilot_store._connect() as connection:
         users = connection.execute("SELECT subject, email FROM users").fetchall()
     assert len(users) == 1
     assert users[0]["subject"] != "96170123456"
     assert "96170123456" not in users[0]["subject"]
     assert not users[0]["email"]
+    user = pilot_store.get_user(
+        pilot_store.upsert_whatsapp_user(users[0]["subject"])["id"]
+    )
+    assert user["consent_at"]
+    with pilot_store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()[
+            "n"
+        ] == 1
 
 
 def test_webhook_rejects_invalid_signature(monkeypatch):

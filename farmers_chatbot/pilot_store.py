@@ -299,6 +299,222 @@ class PilotStore:
                 (CONSENT_VERSION, utc_now(), user_id),
             )
 
+    def user_storage_paths(self, user_id: str) -> list[str]:
+        """Return every private object path owned by a user."""
+
+        self.get_user(user_id)
+        paths: list[str] = []
+        with self._connect() as connection:
+            for table in ("documents", "artifacts"):
+                rows = connection.execute(
+                    self._sql(
+                        f"SELECT storage_path FROM {table} WHERE owner_user_id = ?"
+                    ),
+                    (user_id,),
+                ).fetchall()
+                paths.extend(str(row["storage_path"]) for row in rows)
+            rows = connection.execute(
+                self._sql(
+                    """
+                    SELECT m.attachments_json FROM messages m
+                    JOIN conversations c ON c.id = m.conversation_id
+                    WHERE c.owner_user_id = ?
+                    """
+                ),
+                (user_id,),
+            ).fetchall()
+        for row in rows:
+            for attachment in json.loads(row["attachments_json"] or "[]"):
+                path = attachment.get("storage_path")
+                if path:
+                    paths.append(str(path))
+        return list(dict.fromkeys(paths))
+
+    def storage_inventory(self) -> list[dict[str, Any]]:
+        '''Return provider-neutral metadata for every referenced private object.'''
+
+        inventory: dict[str, dict[str, Any]] = {}
+        with self._connect() as connection:
+            documents = connection.execute(
+                '''
+                SELECT storage_path, mime_type, sha256, size_bytes
+                FROM documents ORDER BY storage_path
+                '''
+            ).fetchall()
+            artifacts = connection.execute(
+                '''
+                SELECT storage_path, mime_type
+                FROM artifacts ORDER BY storage_path
+                '''
+            ).fetchall()
+            messages = connection.execute(
+                'SELECT attachments_json FROM messages ORDER BY created_at'
+            ).fetchall()
+        for row in documents:
+            path = str(row['storage_path'])
+            inventory[path] = {
+                'storage_path': path,
+                'kind': 'document',
+                'mime_type': str(row['mime_type']),
+                'expected_sha256': str(row['sha256']),
+                'expected_size_bytes': int(row['size_bytes']),
+            }
+        for row in artifacts:
+            path = str(row['storage_path'])
+            inventory.setdefault(
+                path,
+                {
+                    'storage_path': path,
+                    'kind': 'artifact',
+                    'mime_type': str(row['mime_type']),
+                    'expected_sha256': None,
+                    'expected_size_bytes': None,
+                },
+            )
+        for row in messages:
+            for attachment in json.loads(row['attachments_json'] or '[]'):
+                path = attachment.get('storage_path')
+                if not path:
+                    continue
+                path = str(path)
+                inventory.setdefault(
+                    path,
+                    {
+                        'storage_path': path,
+                        'kind': str(attachment.get('kind') or 'attachment'),
+                        'mime_type': str(
+                            attachment.get('mime_type')
+                            or 'application/octet-stream'
+                        ),
+                        'expected_sha256': attachment.get('sha256'),
+                        'expected_size_bytes': attachment.get('size_bytes'),
+                    },
+                )
+        return [inventory[path] for path in sorted(inventory)]
+
+    def delete_user_records(self, user_id: str) -> None:
+        """Delete identity/content and retain only anonymous aggregate events."""
+
+        user = self.get_user(user_id)
+        with self._connect() as connection:
+            connection.execute(
+                self._sql("DELETE FROM feedback WHERE user_id = ?"),
+                (user_id,),
+            )
+            connection.execute(
+                self._sql("UPDATE query_events SET user_id = NULL WHERE user_id = ?"),
+                (user_id,),
+            )
+            if user.get("issuer") == "whatsapp-cloud-api":
+                connection.execute(
+                    self._sql("DELETE FROM whatsapp_events WHERE identity_hash = ?"),
+                    (user.get("subject"),),
+                )
+            cursor = connection.execute(
+                self._sql("DELETE FROM users WHERE id = ?"),
+                (user_id,),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("User not found")
+
+    def export_user_data(self, user_id: str) -> dict[str, Any]:
+        """Return a portable copy of a user's active workspace data."""
+
+        user = self.get_user(user_id)
+        with self._connect() as connection:
+            projects = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql(
+                        "SELECT * FROM projects WHERE owner_user_id = ?"
+                    ),
+                    (user_id,),
+                ).fetchall()
+            ]
+            conversations = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql(
+                        "SELECT * FROM conversations WHERE owner_user_id = ?"
+                    ),
+                    (user_id,),
+                ).fetchall()
+            ]
+            messages = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql(
+                        """
+                        SELECT m.* FROM messages m
+                        JOIN conversations c ON c.id = m.conversation_id
+                        WHERE c.owner_user_id = ? ORDER BY m.created_at
+                        """
+                    ),
+                    (user_id,),
+                ).fetchall()
+            ]
+            documents = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql(
+                        "SELECT * FROM documents WHERE owner_user_id = ?"
+                    ),
+                    (user_id,),
+                ).fetchall()
+            ]
+            artifacts = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql(
+                        "SELECT * FROM artifacts WHERE owner_user_id = ?"
+                    ),
+                    (user_id,),
+                ).fetchall()
+            ]
+            feedback = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql("SELECT * FROM feedback WHERE user_id = ?"),
+                    (user_id,),
+                ).fetchall()
+            ]
+            query_events = [
+                dict(row)
+                for row in connection.execute(
+                    self._sql("SELECT * FROM query_events WHERE user_id = ?"),
+                    (user_id,),
+                ).fetchall()
+            ]
+        for message in messages:
+            for field in (
+                "citations_json",
+                "tools_json",
+                "artifacts_json",
+                "attachments_json",
+            ):
+                message[field.removesuffix("_json")] = json.loads(
+                    message.pop(field) or "[]"
+                )
+        for artifact in artifacts:
+            artifact["metadata"] = json.loads(
+                artifact.pop("metadata_json") or "{}"
+            )
+        return {
+            "exported_at": utc_now(),
+            "user": user,
+            "projects": projects,
+            "conversations": conversations,
+            "messages": messages,
+            "documents": documents,
+            "artifacts": artifacts,
+            "feedback": feedback,
+            "query_events": query_events,
+            "note": (
+                "Original uploaded files and generated artifact binaries are not "
+                "embedded in this JSON export. Download them from their cards."
+            ),
+        }
+
     def update_user_preferences(
         self,
         user_id: str,
@@ -401,10 +617,18 @@ class PilotStore:
             if cursor.rowcount != 1:
                 raise ValueError("Project not found")
 
-    def delete_project(self, owner_user_id: str, project_id: str) -> list[str]:
+    def project_storage_paths(
+        self, owner_user_id: str, project_id: str
+    ) -> list[str]:
+        """Return private objects that will be removed with a project."""
+
         documents = self.list_documents(owner_user_id, project_id)
         artifacts = self.list_artifacts(owner_user_id, project_id=project_id)
         paths = [item["storage_path"] for item in [*documents, *artifacts]]
+        return list(dict.fromkeys(paths))
+
+    def delete_project(self, owner_user_id: str, project_id: str) -> list[str]:
+        paths = self.project_storage_paths(owner_user_id, project_id)
         with self._connect() as connection:
             cursor = connection.execute(
                 self._sql("DELETE FROM projects WHERE id = ? AND owner_user_id = ?"),
@@ -562,6 +786,23 @@ class PilotStore:
     def delete_conversation(
         self, owner_user_id: str, conversation_id: str
     ) -> list[str]:
+        paths = self.conversation_storage_paths(owner_user_id, conversation_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                self._sql(
+                    "DELETE FROM conversations WHERE id = ? AND owner_user_id = ?"
+                ),
+                (conversation_id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Conversation not found")
+        return paths
+
+    def conversation_storage_paths(
+        self, owner_user_id: str, conversation_id: str
+    ) -> list[str]:
+        """Return private objects that will be removed with a conversation."""
+
         artifacts = self.list_artifacts(
             owner_user_id,
             conversation_id=conversation_id,
@@ -572,15 +813,6 @@ class PilotStore:
                 storage_path = attachment.get("storage_path")
                 if storage_path:
                     paths.append(str(storage_path))
-        with self._connect() as connection:
-            cursor = connection.execute(
-                self._sql(
-                    "DELETE FROM conversations WHERE id = ? AND owner_user_id = ?"
-                ),
-                (conversation_id, owner_user_id),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError("Conversation not found")
         return list(dict.fromkeys(paths))
 
     def add_message(

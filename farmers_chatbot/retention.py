@@ -74,4 +74,8 @@ def purge_expired_content(
             ),
             (cutoff,),
         )
+        connection.execute(
+            store._sql("DELETE FROM users WHERE last_seen_at < ?"),
+            (cutoff,),
+        )
     return list(dict.fromkeys(paths))

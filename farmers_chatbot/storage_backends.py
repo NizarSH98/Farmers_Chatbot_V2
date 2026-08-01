@@ -134,7 +134,13 @@ class SupabasePrivateStorage:
         signed = response.json().get("signedURL") or response.json().get("signedUrl")
         if not signed:
             return None
-        return signed if signed.startswith("http") else f"{self.url}{signed}"
+        if signed.startswith("http"):
+            return signed
+        if signed.startswith("/storage/v1/"):
+            return f"{self.url}{signed}"
+        if signed.startswith("/object/"):
+            return f"{self.url}/storage/v1{signed}"
+        return f"{self.url}/storage/v1/{signed.lstrip('/')}"
 
 
 def configured_file_storage() -> PrivateFileStorage:

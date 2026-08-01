@@ -29,6 +29,7 @@ from farmers_chatbot.config import (
 )
 from farmers_chatbot.knowledge import KnowledgeIndex
 from farmers_chatbot.language import detect_language
+from farmers_chatbot.legal import whatsapp_consent_message
 from farmers_chatbot.llm import AssistantRequest, AssistantService
 from farmers_chatbot.pilot_store import PilotStore, hash_external_identity
 from farmers_chatbot.storage import EvidenceStore
@@ -195,7 +196,7 @@ def _handle_command(
         return (
             (
                 "Ask a farming, scientific, or rural-enterprise question naturally.\n"
-                "Commands: /new, /help, /mode, /feedback.\n"
+                "Commands: /new, /help, /mode, /feedback, /privacy, /delete.\n"
                 "This is an internal pilot; verify urgent or high-risk advice with a "
                 "qualified local professional."
             ),
@@ -216,6 +217,19 @@ def _handle_command(
             _feedback_command(store, user_id, conversation_id, text),
             conversation_id,
         )
+    if command == "/privacy":
+        return whatsapp_consent_message(), conversation_id
+    if command == "/delete":
+        if text.strip().lower() != "/delete confirm":
+            return (
+                (
+                    "To permanently delete this WhatsApp pilot history and identity, "
+                    "send: /delete confirm"
+                ),
+                conversation_id,
+            )
+        store.delete_user_records(user_id)
+        return "Your WhatsApp pilot identity and history were deleted.", conversation_id
     return None, conversation_id
 
 
@@ -229,6 +243,19 @@ def _process_message(
 ) -> None:
     knowledge, store, evidence_store, trusted_client = _services()
     try:
+        if not store.has_current_consent(user_id):
+            if text.strip().lower() in {"agree", "/agree"}:
+                store.accept_consent(user_id)
+                answer = (
+                    "Thank you. Consent was recorded. Send your first question when "
+                    "you are ready."
+                )
+            else:
+                answer = whatsapp_consent_message()
+            for part in _split_reply(answer):
+                _send_text(recipient, part)
+            store.complete_whatsapp_event(message_id, status="completed")
+            return
         command_reply, conversation_id = _handle_command(
             store,
             user_id,
@@ -378,13 +405,14 @@ async def receive_whatsapp_webhook(
                     user["id"],
                     "whatsapp",
                 )
-                store.add_message(
-                    user["id"],
-                    conversation_id,
-                    role="user",
-                    content=text,
-                    language=detect_language(text),
-                )
+                if store.has_current_consent(user["id"]):
+                    store.add_message(
+                        user["id"],
+                        conversation_id,
+                        role="user",
+                        content=text,
+                        language=detect_language(text),
+                    )
                 background_tasks.add_task(
                     _process_message,
                     message_id=message_id,

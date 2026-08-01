@@ -102,12 +102,21 @@ OPENROUTER_API_URL = os.getenv(
     "OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions"
 )
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
 AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
 ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
 ADMIN_EMAILS = _csv_set("ADMIN_EMAILS")
-CONSENT_VERSION = os.getenv("CONSENT_VERSION", "pilot-2026-08")
+AGREEMENT_TEXT_VERSION = "pilot-2026-08-v1"
+CONSENT_VERSION = os.getenv("CONSENT_VERSION", AGREEMENT_TEXT_VERSION)
+ORGANIZATION_NAME = os.getenv(
+    "ORGANIZATION_NAME", "RAISE / ESDU internal pilot"
+).strip()
+PRIVACY_CONTACT_EMAIL = os.getenv(
+    "PRIVACY_CONTACT_EMAIL",
+    "privacy-contact-not-configured@example.invalid",
+).strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 LOCAL_PILOT_DB_PATH = Path(os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"))
 LOCAL_FILE_ROOT = Path(os.getenv("LOCAL_FILE_ROOT", "data/pilot_files"))

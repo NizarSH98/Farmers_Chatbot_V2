@@ -37,6 +37,10 @@ data/*.sqlite3-*
 data/pilot_files/
 data/artifacts/
 reports/generated/
+pilot_exports/
+
+# Raw source intake is reviewed locally before approved claims are promoted.
+knowledge_base/incoming/
 
 # Contractual source workbook is local evidence, not deployed runtime material.
 RAISE_Logframe_final.xlsx

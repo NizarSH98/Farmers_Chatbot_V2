@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import time
 import uuid
@@ -19,14 +20,17 @@ from .artifacts import ArtifactService
 from .auth import IdentityError, UserIdentity, current_streamlit_identity
 from .config import (
     AUTH_MODE,
+    CONSENT_VERSION,
     MAX_CHAT_IMAGE_BYTES,
     MODE_PROFILES,
+    PRIVACY_CONTACT_EMAIL,
     RETENTION_DAYS,
 )
 from .deployment_guard import validate_web_runtime
 from .documents import DocumentService
 from .knowledge import KnowledgeIndex
 from .language import detect_language
+from .legal import agreement_markdown, agreement_markdown_ar
 from .llm import AssistantRequest, AssistantService
 from .pilot_store import PilotStore
 from .retention import purge_expired_content
@@ -126,29 +130,110 @@ def ensure_identity(store: PilotStore) -> tuple[UserIdentity, dict[str, Any]] | 
 def render_consent(identity: UserIdentity, store: PilotStore) -> None:
     if store.has_current_consent(identity.user_id):
         return
-    st.title("Pilot consent / الموافقة على الاختبار")
+    st.title("Pilot agreement / اتفاقية النسخة التجريبية")
     st.warning(
-        "Use only public or non-sensitive agricultural information. Questions, "
-        "project files, answer metadata, and feedback may be processed by configured "
-        "cloud providers and retained for 30 days for the internal pilot."
+        "Read both the user agreement and privacy notice before continuing. "
+        "Use only public or non-sensitive agricultural information."
     )
-    accepted = st.checkbox(
-        "I understand the pilot limits and consent to this processing and retention."
+    tab_en, tab_ar = st.tabs(["English", "العربية"])
+    with tab_en:
+        st.markdown(agreement_markdown())
+    with tab_ar:
+        st.markdown(agreement_markdown_ar())
+    accepted_terms = st.checkbox(
+        f"I have read and accept agreement version {CONSENT_VERSION}."
     )
+    accepted_processing = st.checkbox(
+        "I understand that my questions and relevant context may be sent to the "
+        "configured AI providers to generate answers."
+    )
+    accepted_safety = st.checkbox(
+        "I will not submit sensitive personal, confidential, or unauthorized data."
+    )
+    accepted = accepted_terms and accepted_processing and accepted_safety
     if st.button("Accept and continue", type="primary", disabled=not accepted):
         store.accept_consent(identity.user_id)
         st.rerun()
+    st.caption(f"Privacy questions: {PRIVACY_CONTACT_EMAIL}")
     if AUTH_MODE == "google":
         st.button("Log out", on_click=st.logout)
     st.stop()
 
 
-def _delete_paths(storage: PrivateFileStorage, paths: list[str]) -> None:
+def _delete_paths(storage: PrivateFileStorage, paths: list[str]) -> list[str]:
+    failed: list[str] = []
     for path in paths:
         try:
             storage.delete(path)
-        except Exception:  # noqa: BLE001, S112 - continue deleting owned files
-            continue
+        except Exception:  # noqa: BLE001 - continue deleting owned files
+            failed.append(path)
+    return failed
+
+
+def render_data_controls(
+    identity: UserIdentity,
+    store: PilotStore,
+    storage: PrivateFileStorage,
+) -> None:
+    """Show notice, export, and deletion controls for the signed-in user."""
+
+    with st.expander("Privacy and my data / الخصوصية وبياناتي"):
+        st.caption(
+            f"Agreement {CONSENT_VERSION} · retention up to {RETENTION_DAYS} days · "
+            f"contact {PRIVACY_CONTACT_EMAIL}"
+        )
+        with st.popover("Read agreement / اقرأ الاتفاقية"):
+            language = st.radio(
+                "Agreement language",
+                ["English", "العربية"],
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+            st.markdown(
+                agreement_markdown()
+                if language == "English"
+                else agreement_markdown_ar()
+            )
+        export_json = json.dumps(
+            store.export_user_data(identity.user_id),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+        st.download_button(
+            "Download my workspace data (JSON)",
+            data=export_json,
+            file_name="raise-pilot-my-data.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+        st.caption(
+            "Uploaded files and artifact binaries are downloaded separately from "
+            "their project or artifact cards."
+        )
+        confirmation = st.text_input(
+            "To permanently delete your account, type DELETE MY ACCOUNT",
+            key="account_delete_confirmation",
+        )
+        if st.button(
+            "Delete my account and private content",
+            type="secondary",
+            disabled=confirmation != "DELETE MY ACCOUNT",
+            use_container_width=True,
+        ):
+            paths = store.user_storage_paths(identity.user_id)
+            failed = _delete_paths(storage, paths)
+            if failed:
+                st.error(
+                    "Account deletion stopped because one or more private files "
+                    "could not be removed. Contact the privacy administrator."
+                )
+                return
+            store.delete_user_records(identity.user_id)
+            if AUTH_MODE == "google":
+                st.logout()
+            st.session_state.clear()
+            st.rerun()
 
 
 def render_project_manager(
@@ -241,10 +326,26 @@ def render_project_manager(
 
             documents = store.list_documents(identity.user_id, selected)
             for document in documents:
-                col_name, col_delete = st.columns([4, 1])
+                col_name, col_download, col_delete = st.columns([4, 1, 1])
                 col_name.caption(
                     f"{document['filename']} · {document['size_bytes'] // 1024} KB"
                 )
+                signed_url = storage.signed_url(
+                    document["storage_path"], expires_seconds=600
+                )
+                if signed_url:
+                    col_download.link_button("Download", signed_url)
+                else:
+                    try:
+                        col_download.download_button(
+                            "Download",
+                            data=storage.get(document["storage_path"]),
+                            file_name=document["filename"],
+                            mime=document["mime_type"],
+                            key=f"download_doc_{document['id']}",
+                        )
+                    except (FileNotFoundError, RuntimeError):
+                        col_download.caption("Unavailable")
                 if col_delete.button(
                     "Delete",
                     key=f"delete_doc_{document['id']}",
@@ -261,11 +362,18 @@ def render_project_manager(
                 "Delete project and its private files",
                 key=f"delete_project_{selected}",
             ):
-                paths = store.delete_project(identity.user_id, selected)
-                _delete_paths(storage, paths)
-                st.session_state.project_id = None
-                st.session_state.conversation_id = None
-                st.rerun()
+                paths = store.project_storage_paths(identity.user_id, selected)
+                failed = _delete_paths(storage, paths)
+                if failed:
+                    st.error(
+                        "Project deletion stopped because a private file could not "
+                        "be removed. Please retry or contact the privacy administrator."
+                    )
+                else:
+                    store.delete_project(identity.user_id, selected)
+                    st.session_state.project_id = None
+                    st.session_state.conversation_id = None
+                    st.rerun()
     return selected
 
 
@@ -339,10 +447,19 @@ def render_conversation_manager(
             st.session_state.conversation_id = None
             st.rerun()
         if st.button("Delete chat", key=f"delete_chat_{conversation_id}"):
-            paths = store.delete_conversation(identity.user_id, conversation_id)
-            _delete_paths(storage, paths)
-            st.session_state.conversation_id = None
-            st.rerun()
+            paths = store.conversation_storage_paths(
+                identity.user_id, conversation_id
+            )
+            failed = _delete_paths(storage, paths)
+            if failed:
+                st.error(
+                    "Chat deletion stopped because a private file could not be "
+                    "removed. Please retry or contact the privacy administrator."
+                )
+            else:
+                store.delete_conversation(identity.user_id, conversation_id)
+                st.session_state.conversation_id = None
+                st.rerun()
     return conversation_id
 
 
@@ -394,6 +511,8 @@ def render_sidebar(
             storage,
             project_id,
         )
+        st.divider()
+        render_data_controls(identity, store, storage)
         if identity.is_admin:
             with st.expander("Pilot metrics"):
                 performance = store.performance_summary()

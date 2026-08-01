@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -39,6 +40,7 @@ def identity_from_claims(claims: Mapping[str, Any]) -> UserIdentity:
     email = str(claims.get("email") or "").strip().lower()
     name = str(claims.get("name") or email or "Pilot user").strip()
     email_verified = claims.get("email_verified")
+    expires_at = claims.get("exp")
 
     if issuer not in GOOGLE_ISSUERS:
         raise IdentityError("The identity was not issued by Google.")
@@ -46,6 +48,13 @@ def identity_from_claims(claims: Mapping[str, Any]) -> UserIdentity:
         raise IdentityError("Google identity is missing issuer or subject.")
     if not email or email_verified not in {True, "true", "True"}:
         raise IdentityError("A verified Google email address is required.")
+    if expires_at is not None:
+        try:
+            expired = int(expires_at) <= int(time.time())
+        except (TypeError, ValueError) as exc:
+            raise IdentityError("Google identity has an invalid expiry claim.") from exc
+        if expired:
+            raise IdentityError("Google session expired. Log out and sign in again.")
     if not access_allowed(email):
         raise IdentityError("This Google account is not allowed to access the pilot.")
 
