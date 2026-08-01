@@ -167,18 +167,22 @@ The retrieval evaluator writes a generated report under `reports/generated/`. Th
 - `docs/PILOT_DEPLOYMENT_RUNBOOK.md`
 - `docs/PILOT_PROVIDER_SETUP_CHECKLIST.md`
 - `docs/DATA_PORTABILITY.md`
+- `docs/POLICY_APPROVAL_CHECKLIST.md`
 - `docs/PILOT_READINESS_2026-07-29.md`
+- `docs/PILOT_READINESS_2026-08-01.md`
 - `docs/SOURCE_DOCUMENT_INTAKE.md`
 
 Software metrics and contractual achievement are reported separately. Code cannot substitute for 40–50 stakeholder records, four feedback sessions, or approval of the final RRO.
 
 ## Deployment
 
-The internal pilot target is Streamlit Community Cloud with Google OIDC and
-Supabase, followed by the optional Render/Meta test-number service only after web
-gates pass. Use `docs/PILOT_DEPLOYMENT_RUNBOOK.md` for owner setup, managed secrets,
-privacy/load gates, freeze, rollback, and WhatsApp verification. The contractual
-workbook is local evidence and is deliberately excluded from deployed runtime source.
+The first internal deployment target is Streamlit Community Cloud with Google OIDC
+and portable PostgreSQL/private object storage currently supplied by Supabase,
+followed by the optional Render/Meta test-number service only after web gates pass.
+Use `docs/PILOT_DEPLOYMENT_RUNBOOK.md` for owner setup, managed secrets,
+20–30-user rehearsal gates, freeze, rollback, and WhatsApp verification. The
+contractual workbook is local evidence and is deliberately excluded from deployed
+runtime source.
 Continue development on `pilot`; deploy Streamlit from the protected
 `release/pilot-2026-08` branch so Community Cloud's automatic GitHub updates cannot
 change the frozen test build.
@@ -189,7 +193,9 @@ The assistant is decision support, not a substitute for an agronomist, veterinar
 
 Connected generation sends the farmer's text, recent conversation context, and retrieved passages to the configured model provider. Online TTS sends answer text to its provider. Do not collect names, phone numbers, precise personal location, or other personal data unless an approved pilot process requires it and obtains informed consent.
 
-The web and WhatsApp channels enforce a versioned agreement before normal use.
+The web and WhatsApp channels enforce a versioned lifecycle-wide user agreement
+and privacy policy before normal use. Both documents are also readable before web
+sign-in.
 Users can export active workspace data and delete their account/private content.
 The agreement is an operational template and still requires institutional
 privacy/legal approval before public or production use.

@@ -1,4 +1,4 @@
-"""Authenticated Streamlit workspace for the RAISE internal pilot."""
+"""Authenticated Streamlit workspace for the RAISE-ESDU project."""
 
 from __future__ import annotations
 
@@ -14,15 +14,20 @@ from typing import Any
 
 import streamlit as st
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .artifacts import ArtifactService
 from .auth import IdentityError, UserIdentity, current_streamlit_identity
 from .config import (
+    APP_DISPLAY_NAME,
+    APP_PUBLIC_URL,
     AUTH_MODE,
     CONSENT_VERSION,
     MAX_CHAT_IMAGE_BYTES,
     MODE_PROFILES,
+    MODEL_CATALOG,
+    OPENROUTER_ALLOWED_MODELS,
+    OPENROUTER_DEFAULT_MODEL,
     PRIVACY_CONTACT_EMAIL,
     RETENTION_DAYS,
 )
@@ -30,7 +35,12 @@ from .deployment_guard import validate_web_runtime
 from .documents import DocumentService
 from .knowledge import KnowledgeIndex
 from .language import detect_language
-from .legal import agreement_markdown, agreement_markdown_ar
+from .legal import (
+    agreement_markdown,
+    agreement_markdown_ar,
+    privacy_policy_markdown,
+    privacy_policy_markdown_ar,
+)
 from .llm import AssistantRequest, AssistantService
 from .pilot_store import PilotStore
 from .retention import purge_expired_content
@@ -48,7 +58,7 @@ CLARIFICATION_STYLES = {
 }
 
 
-@st.cache_resource(show_spinner="Preparing the bilingual pilot workspace…")
+@st.cache_resource(show_spinner="Preparing the bilingual workspace…")
 def get_services() -> tuple[
     KnowledgeIndex,
     PilotStore,
@@ -78,6 +88,11 @@ def _mode_label(key: str) -> str:
     return f"{profile.label_en} / {profile.label_ar}"
 
 
+def _model_label(model_id: str) -> str:
+    option = MODEL_CATALOG[model_id]
+    return f"{option.label} — {option.id}"
+
+
 def _init_state() -> None:
     defaults = {
         "conversation_id": None,
@@ -91,12 +106,56 @@ def _init_state() -> None:
             st.session_state[key] = value
 
 
+def _legal_url(document: str) -> str:
+    base = APP_PUBLIC_URL or ""
+    if not base:
+        return f"?legal={document}"
+    separator = "&" if "?" in base else "?"
+    return f"{base}{separator}legal={document}"
+
+
+def _render_public_legal(document: str) -> None:
+    if document == "privacy":
+        title = "Privacy Policy / سياسة الخصوصية"
+        english = privacy_policy_markdown()
+        arabic = privacy_policy_markdown_ar()
+    else:
+        title = "User Agreement / اتفاقية الاستخدام"
+        english = agreement_markdown()
+        arabic = agreement_markdown_ar()
+    st.subheader(title)
+    tab_en, tab_ar = st.tabs(["English", "العربية"])
+    with tab_en:
+        st.markdown(english)
+    with tab_ar:
+        st.markdown(arabic)
+
+
 def render_login() -> None:
-    st.title("🌿 RAISE Farmer Assistant")
-    st.subheader("ESDU internal pilot / النسخة التجريبية الداخلية")
+    st.title(f"🌿 {APP_DISPLAY_NAME}")
+    legal_view = str(st.query_params.get("legal") or "").strip().lower()
+    if legal_view in {"privacy", "terms"}:
+        _render_public_legal(legal_view)
+        st.markdown(f"[← Back to application]({APP_PUBLIC_URL or './'})")
+    else:
+        st.subheader("Accessible agricultural decision support / دعم زراعي مبسّط")
+        st.write(
+            "Ask agricultural, scientific, environmental, economic, and rural-"
+            "enterprise questions. The service can retrieve reviewed knowledge, "
+            "show sources, use bounded tools, and create practical artifacts."
+        )
+        st.info(
+            "AI answers can be wrong. Verify high-risk agricultural, veterinary, "
+            "food-safety, financial, engineering, and regulatory decisions with a "
+            "qualified professional. Submit only public or non-sensitive material."
+        )
+        st.markdown(
+            f"[Privacy Policy]({_legal_url('privacy')}) · "
+            f"[User Agreement]({_legal_url('terms')})"
+        )
     st.write(
-        "Sign in with a verified Google account to access your private pilot "
-        "workspace. No password is stored by this application."
+        "Sign in with a verified Google account to create a private workspace. "
+        "The application does not receive or store your Google password."
     )
     st.button(
         "Continue with Google",
@@ -106,18 +165,28 @@ def render_login() -> None:
     )
 
 
-def ensure_identity(store: PilotStore) -> tuple[UserIdentity, dict[str, Any]] | None:
+def public_identity() -> UserIdentity | None:
+    """Resolve identity before initializing private workspace services."""
+
     try:
         identity = current_streamlit_identity(st)
     except IdentityError as exc:
         st.error(str(exc))
         if AUTH_MODE == "google":
             st.button("Log out", on_click=st.logout)
-        st.stop()
         return None
     if identity is None:
         render_login()
-        st.stop()
+    return identity
+
+
+def ensure_identity(
+    store: PilotStore,
+    identity: UserIdentity | None = None,
+) -> tuple[UserIdentity, dict[str, Any]] | None:
+    if identity is None:
+        identity = public_identity()
+    if identity is None:
         return None
     user = store.upsert_user(identity)
     identity = replace(identity, user_id=user["id"])
@@ -130,18 +199,23 @@ def ensure_identity(store: PilotStore) -> tuple[UserIdentity, dict[str, Any]] | 
 def render_consent(identity: UserIdentity, store: PilotStore) -> None:
     if store.has_current_consent(identity.user_id):
         return
-    st.title("Pilot agreement / اتفاقية النسخة التجريبية")
+    st.title("User Agreement and Privacy Policy / الاتفاقية وسياسة الخصوصية")
     st.warning(
-        "Read both the user agreement and privacy notice before continuing. "
+        "Read both lifecycle documents before continuing. "
         "Use only public or non-sensitive agricultural information."
     )
     tab_en, tab_ar = st.tabs(["English", "العربية"])
     with tab_en:
         st.markdown(agreement_markdown())
+        st.divider()
+        st.markdown(privacy_policy_markdown())
     with tab_ar:
         st.markdown(agreement_markdown_ar())
+        st.divider()
+        st.markdown(privacy_policy_markdown_ar())
     accepted_terms = st.checkbox(
-        f"I have read and accept agreement version {CONSENT_VERSION}."
+        f"I accept the User Agreement and acknowledge the Privacy Policy, "
+        f"version {CONSENT_VERSION}."
     )
     accepted_processing = st.checkbox(
         "I understand that my questions and relevant context may be sent to the "
@@ -150,7 +224,13 @@ def render_consent(identity: UserIdentity, store: PilotStore) -> None:
     accepted_safety = st.checkbox(
         "I will not submit sensitive personal, confidential, or unauthorized data."
     )
-    accepted = accepted_terms and accepted_processing and accepted_safety
+    accepted_age = st.checkbox(
+        "I am at least 18, or I am using the service under approved adult or "
+        "institutional supervision."
+    )
+    accepted = (
+        accepted_terms and accepted_processing and accepted_safety and accepted_age
+    )
     if st.button("Accept and continue", type="primary", disabled=not accepted):
         store.accept_consent(identity.user_id)
         st.rerun()
@@ -182,18 +262,27 @@ def render_data_controls(
             f"Agreement {CONSENT_VERSION} · retention up to {RETENTION_DAYS} days · "
             f"contact {PRIVACY_CONTACT_EMAIL}"
         )
-        with st.popover("Read agreement / اقرأ الاتفاقية"):
+        with st.popover("Read legal documents / اقرأ المستندات القانونية"):
             language = st.radio(
-                "Agreement language",
+                "Document language",
                 ["English", "العربية"],
                 horizontal=True,
                 label_visibility="collapsed",
             )
-            st.markdown(
-                agreement_markdown()
-                if language == "English"
-                else agreement_markdown_ar()
+            document = st.radio(
+                "Document",
+                ["User Agreement", "Privacy Policy"],
+                horizontal=True,
             )
+            if language == "English" and document == "User Agreement":
+                content = agreement_markdown()
+            elif language == "English":
+                content = privacy_policy_markdown()
+            elif document == "User Agreement":
+                content = agreement_markdown_ar()
+            else:
+                content = privacy_policy_markdown_ar()
+            st.markdown(content)
         export_json = json.dumps(
             store.export_user_data(identity.user_id),
             ensure_ascii=False,
@@ -203,7 +292,7 @@ def render_data_controls(
         st.download_button(
             "Download my workspace data (JSON)",
             data=export_json,
-            file_name="raise-pilot-my-data.json",
+            file_name="raise-esdu-my-data.json",
             mime="application/json",
             use_container_width=True,
         )
@@ -468,7 +557,7 @@ def render_sidebar(
     user: dict[str, Any],
     store: PilotStore,
     storage: PrivateFileStorage,
-) -> tuple[str, str, str | None, str]:
+) -> tuple[str, str, str, str | None, str]:
     with st.sidebar:
         st.markdown("## RAISE 🌿")
         st.caption(f"{identity.name} · {identity.email or 'WhatsApp identity'}")
@@ -486,6 +575,20 @@ def render_sidebar(
             index=list(MODE_PROFILES).index(configured_mode),
             format_func=_mode_label,
         )
+        available_models = list(OPENROUTER_ALLOWED_MODELS)
+        preferred_model = (
+            OPENROUTER_DEFAULT_MODEL
+            if OPENROUTER_DEFAULT_MODEL in available_models
+            else MODE_PROFILES[mode_key].model
+        )
+        if preferred_model not in available_models:
+            preferred_model = available_models[0]
+        model_id = st.selectbox(
+            "AI model / نموذج الذكاء الاصطناعي",
+            available_models,
+            index=available_models.index(preferred_model),
+            format_func=_model_label,
+        )
         configured_style = user.get("clarification_style", "auto")
         if configured_style not in CLARIFICATION_STYLES:
             configured_style = "auto"
@@ -496,9 +599,10 @@ def render_sidebar(
             format_func=CLARIFICATION_STYLES.get,
         )
         profile = MODE_PROFILES[mode_key]
+        model_option = MODEL_CATALOG[model_id]
         st.caption(
-            f"{profile.description} Model: `{profile.model}` · "
-            f"reasoning: `{profile.reasoning_effort}`"
+            f"{profile.description} {model_option.description} "
+            f"Reasoning: `{profile.reasoning_effort}`."
         )
         st.metric("Queries remaining today", st.session_state.remaining_queries)
 
@@ -518,7 +622,7 @@ def render_sidebar(
                 performance = store.performance_summary()
                 feedback = store.feedback_summary()
                 st.json({**performance, **feedback})
-    return mode_key, clarification_style, project_id, conversation_id
+    return mode_key, clarification_style, model_id, project_id, conversation_id
 
 
 def render_citations(citations: list[dict[str, Any]]) -> None:
@@ -690,10 +794,28 @@ def _prepare_chat_image(
     if upload.type not in {"image/jpeg", "image/png"}:
         raise ValueError("Only JPG and PNG chat images are accepted")
     try:
-        image = Image.open(io.BytesIO(data))
-        image.verify()
+        with Image.open(io.BytesIO(data)) as uploaded_image:
+            uploaded_image.load()
+            if uploaded_image.width * uploaded_image.height > 24_000_000:
+                raise ValueError("Image dimensions are too large")
+            image = ImageOps.exif_transpose(uploaded_image)
+            image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+            normalized = io.BytesIO()
+            if upload.type == "image/png":
+                mode = "RGBA" if "A" in image.getbands() else "RGB"
+                image.convert(mode).save(normalized, format="PNG", optimize=True)
+            else:
+                image.convert("RGB").save(
+                    normalized,
+                    format="JPEG",
+                    quality=90,
+                    optimize=True,
+                )
+            data = normalized.getvalue()
     except Exception as exc:
         raise ValueError("Image file is invalid") from exc
+    if not data or len(data) > MAX_CHAT_IMAGE_BYTES:
+        raise ValueError("Normalized image is larger than 5 MB")
     extension = ".png" if upload.type == "image/png" else ".jpg"
     storage_path = (
         f"users/{identity.user_id}/conversations/{conversation_id}/images/"
@@ -716,32 +838,42 @@ def _prepare_chat_image(
 
 def main() -> None:
     st.set_page_config(
-        page_title="RAISE ESDU Farmer Assistant",
+        page_title=APP_DISPLAY_NAME,
         page_icon="🌿",
         layout="wide",
         initial_sidebar_state="expanded",
     )
     _init_state()
+    validate_web_runtime()
+    identity = public_identity()
+    if identity is None:
+        return
     knowledge, store, storage, trusted_client = get_services()
-    identity_result = ensure_identity(store)
+    identity_result = ensure_identity(store, identity)
     if not identity_result:
         return
     identity, user = identity_result
     render_consent(identity, store)
-    mode_key, clarification_style, project_id, conversation_id = render_sidebar(
+    (
+        mode_key,
+        clarification_style,
+        model_id,
+        project_id,
+        conversation_id,
+    ) = render_sidebar(
         identity,
         user,
         store,
         storage,
     )
 
-    st.title("🌿 RAISE Farmer Assistant")
+    st.title(f"🌿 {APP_DISPLAY_NAME}")
     st.markdown(
         "**Akkar and rural Lebanon · عكار وريف لبنان**  \n"
         "Locally grounded agricultural, scientific, and rural-enterprise support."
     )
     st.info(
-        "Internal pilot: verify high-risk agronomic, pesticide, veterinary, "
+        "Decision support: verify high-risk agronomic, pesticide, veterinary, "
         "food-safety, financial, water-quality, and engineering decisions with a "
         "qualified local expert."
     )
@@ -760,11 +892,20 @@ def main() -> None:
             st.session_state.pending_prompt = previous_user
             st.rerun()
 
-    with st.expander("Attach a crop/farm image / أرفق صورة", expanded=False):
-        chat_image = st.file_uploader(
-            "JPG or PNG, maximum 5 MB; no definitive diagnosis is made from an image.",
-            type=["jpg", "jpeg", "png"],
-            key=f"chat_image_{st.session_state.image_uploader_version}",
+    model_supports_images = MODEL_CATALOG[model_id].supports_images
+    if model_supports_images:
+        with st.expander("Attach a crop/farm image / أرفق صورة", expanded=False):
+            chat_image = st.file_uploader(
+                "JPG or PNG, maximum 5 MB; no definitive diagnosis is made from an image.",
+                type=["jpg", "jpeg", "png"],
+                key=f"chat_image_{st.session_state.image_uploader_version}",
+            )
+    else:
+        chat_image = None
+        st.caption(
+            "Image input is disabled for this model because its pilot vision "
+            "compatibility check did not pass. Choose MiMo, MiniMax, or Kimi "
+            "to attach a field image."
         )
 
     user_input = st.chat_input(
@@ -864,6 +1005,7 @@ def main() -> None:
         text=user_input,
         attachments=((model_attachment,) if model_attachment else ()),
         mode=mode_key,
+        model_id=model_id,
         clarification_style=clarification_style,
         project_instructions=project_instructions,
     )
