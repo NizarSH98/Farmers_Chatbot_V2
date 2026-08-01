@@ -38,8 +38,8 @@ def percentile(values: list[int], fraction: float) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--iterations", type=int, default=30)
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--iterations", type=int, default=60)
+    parser.add_argument("--workers", type=int, default=30)
     parser.add_argument("--mode", default="standard")
     parser.add_argument(
         "--connected",

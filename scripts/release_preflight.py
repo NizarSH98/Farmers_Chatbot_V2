@@ -1,4 +1,4 @@
-'''Static fail-closed checks for pilot deployment inputs.'''
+'''Static fail-closed checks for deployment inputs.'''
 
 from __future__ import annotations
 
@@ -35,12 +35,17 @@ def main() -> int:
         '.github/workflows/ci.yml',
         'deployment/streamlit_secrets.toml.example',
         'farmers_chatbot/legal.py',
+        'legal/PRIVACY_POLICY.ar.md',
+        'legal/PRIVACY_POLICY.en.md',
+        'legal/USER_AGREEMENT.ar.md',
+        'legal/USER_AGREEMENT.en.md',
         'migrations/001_pilot_schema.sql',
         'rag_chatbot.py',
         'render.yaml',
         'requirements.txt',
         'scripts/pilot_data_portability.py',
         'docs/DATA_PORTABILITY.md',
+        'docs/POLICY_APPROVAL_CHECKLIST.md',
     }
     missing = [path for path in sorted(required) if not (ROOT / path).is_file()]
     if missing:
@@ -59,7 +64,9 @@ def main() -> int:
     )
     for key in (
         'APP_ENV',
+        'APP_DISPLAY_NAME',
         'AUTH_MODE',
+        'CONSENT_VERSION',
         'DATABASE_URL',
         'PRIVACY_CONTACT_EMAIL',
         'SUPABASE_SERVICE_ROLE_KEY',

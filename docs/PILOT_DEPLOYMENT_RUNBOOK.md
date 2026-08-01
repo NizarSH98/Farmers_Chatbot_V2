@@ -1,8 +1,9 @@
 # ESDU Internal AI Pilot Deployment Runbook
 
-Last updated: 2026-07-30
+Last updated: 2026-08-01
 Release freeze target: 2026-08-05  
-Pilot size: up to 15 testers and five concurrent users
+Internal-test size: 20–30 simultaneous users; open registration with a verified
+Google account
 
 The web workspace is the release requirement. WhatsApp is a stretch channel and
 must not block web release. All real credentials belong in provider-managed secrets,
@@ -39,7 +40,7 @@ python -m compileall -q farmers_chatbot rag_chatbot.py mcp_server.py whatsapp_ap
 python -m ruff check .
 python -m pytest -q
 python scripts/evaluate_retrieval.py
-python scripts/benchmark_service.py --iterations 30
+python scripts/benchmark_service.py --iterations 60 --workers 30
 ```
 
 Run the web app locally without Google login:
@@ -94,11 +95,17 @@ http://localhost:8501/oauth2callback
 https://YOUR-APP.streamlit.app/oauth2callback
 ```
 
-6. For the internal test, set `ACCESS_POLICY=email_allowlist` and configure the
-   invited testers in `ALLOWED_EMAILS`. Keep administration separate through
-   `ADMIN_EMAILS`. Reconsider `google_any` only before wider public access.
+6. Set `ACCESS_POLICY=google_any` so any verified Google account can register.
+   Keep administration separate through the single exact email in
+   `ADMIN_EMAILS`; open registration must never grant administration.
 7. Verify login, consent, logout, denied unverified email claims, and that the
    persistent database key is `issuer + sub`, not email.
+8. Before public production, complete Google's public application home page,
+   privacy-policy, verified-domain, branding, and publication requirements. The
+   current operator does not control `aub.edu.lb`; follow
+   `docs/POLICY_APPROVAL_CHECKLIST.md` for the AUB-hosted-page or project-domain
+   decision. Do not describe the application as an approved AUB service without
+   written authority.
 
 ## 5. Streamlit Community Cloud deployment
 
@@ -120,6 +127,12 @@ https://YOUR-APP.streamlit.app/oauth2callback
    the protected release branch during the ESDU session and continue improvements
    on `pilot`.
 8. Keep the prior tested release commit SHA as the rollback target.
+9. Community Cloud capacity is not guaranteed for 20–30 simultaneous users.
+   Apply for its nonprofit/education resource increase, then run the deployed
+   connected rehearsal described below. If it throttles, restarts, or misses the
+   latency/availability gate, move the same repository and portable Postgres/
+   object-storage configuration to an approved paid container host before the
+   test. Do not reduce privacy or isolation controls to meet capacity.
 
 ## 6. Web release gates
 
@@ -138,8 +151,8 @@ The web release is allowed only when all are true:
   failure;
 - DOCX/XLSX artifacts open and contain date, assumptions, units, and sources;
 - the approved 30-question bilingual retrieval set remains at or above 80%;
-- a five-user, 30-request connected workload has at least 90% priority test success
-  and median end-to-end latency no greater than 10 seconds;
+- a 20–30-user, 60-request connected workload has at least 90% priority test
+  success and median end-to-end latency no greater than 10 seconds;
 - a controlled two-hour check records at least 95% availability;
 - no critical authentication, privacy, safety, or tool-permission defect remains.
 
@@ -210,6 +223,10 @@ business-number onboarding remain out of scope.
   https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
 - Streamlit automatic GitHub updates:
   https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app
+- Streamlit resource-limit support:
+  https://docs.streamlit.io/knowledge-base/deploy/resource-limits
+- Google OAuth production policy:
+  https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance
 - Supabase database connections and poolers:
   https://supabase.com/docs/guides/database/connecting-to-postgres
 - Supabase Storage access control:

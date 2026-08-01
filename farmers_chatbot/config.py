@@ -103,15 +103,16 @@ OPENROUTER_API_URL = os.getenv(
 )
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
+APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()
 AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
 ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
 ADMIN_EMAILS = _csv_set("ADMIN_EMAILS")
-AGREEMENT_TEXT_VERSION = "pilot-2026-08-v1"
+AGREEMENT_TEXT_VERSION = "project-2026-08-v1"
 CONSENT_VERSION = os.getenv("CONSENT_VERSION", AGREEMENT_TEXT_VERSION)
 ORGANIZATION_NAME = os.getenv(
-    "ORGANIZATION_NAME", "RAISE / ESDU internal pilot"
+    "ORGANIZATION_NAME", "RAISE-ESDU"
 ).strip()
 PRIVACY_CONTACT_EMAIL = os.getenv(
     "PRIVACY_CONTACT_EMAIL",
