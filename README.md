@@ -159,6 +159,7 @@ The retrieval evaluator writes a generated report under `reports/generated/`. Th
 - `docs/GOVERNANCE_AND_VALIDATION.md`
 - `docs/INTERNAL_REVIEW.md`
 - `docs/ARCHITECTURE.md`
+- `docs/UI_UX.md`
 - `docs/FIELD_SESSION_TEMPLATE.md`
 - `docs/ESDU_INTERNAL_KNOWLEDGE_INTAKE.md`
 - `docs/STAKEHOLDER_TRACKER_SCHEMA.md`

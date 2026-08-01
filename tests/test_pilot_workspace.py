@@ -24,6 +24,19 @@ def _identity(subject: str, email: str) -> UserIdentity:
     )
 
 
+def test_explicit_sqlite_path_never_inherits_configured_database_url(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        "farmers_chatbot.pilot_store.DATABASE_URL",
+        "postgresql://production.example/raise",
+    )
+    store = PilotStore(sqlite_path=tmp_path / "isolated.sqlite3")
+    assert store.database_url == ""
+    assert not store.is_postgres
+
+
 def test_verified_google_identity_and_authorization_policies(monkeypatch):
     claims = {
         "iss": "https://accounts.google.com",

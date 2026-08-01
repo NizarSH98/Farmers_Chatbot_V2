@@ -43,11 +43,16 @@ class PilotStore:
 
     def __init__(
         self,
-        database_url: str = DATABASE_URL,
-        sqlite_path: str | Path = LOCAL_PILOT_DB_PATH,
+        database_url: str | None = None,
+        sqlite_path: str | Path | None = None,
     ) -> None:
+        # Passing a SQLite path is an explicit local-only choice. This prevents
+        # tests and maintenance scripts from silently using a DATABASE_URL that
+        # happens to be present in the developer's environment.
+        if database_url is None:
+            database_url = "" if sqlite_path is not None else DATABASE_URL
         self.database_url = database_url.strip()
-        self.sqlite_path = Path(sqlite_path)
+        self.sqlite_path = Path(sqlite_path or LOCAL_PILOT_DB_PATH)
         self.is_postgres = self.database_url.startswith(
             ("postgres://", "postgresql://")
         )
@@ -331,63 +336,62 @@ class PilotStore:
         return list(dict.fromkeys(paths))
 
     def storage_inventory(self) -> list[dict[str, Any]]:
-        '''Return provider-neutral metadata for every referenced private object.'''
+        """Return provider-neutral metadata for every referenced private object."""
 
         inventory: dict[str, dict[str, Any]] = {}
         with self._connect() as connection:
             documents = connection.execute(
-                '''
+                """
                 SELECT storage_path, mime_type, sha256, size_bytes
                 FROM documents ORDER BY storage_path
-                '''
+                """
             ).fetchall()
             artifacts = connection.execute(
-                '''
+                """
                 SELECT storage_path, mime_type
                 FROM artifacts ORDER BY storage_path
-                '''
+                """
             ).fetchall()
             messages = connection.execute(
-                'SELECT attachments_json FROM messages ORDER BY created_at'
+                "SELECT attachments_json FROM messages ORDER BY created_at"
             ).fetchall()
         for row in documents:
-            path = str(row['storage_path'])
+            path = str(row["storage_path"])
             inventory[path] = {
-                'storage_path': path,
-                'kind': 'document',
-                'mime_type': str(row['mime_type']),
-                'expected_sha256': str(row['sha256']),
-                'expected_size_bytes': int(row['size_bytes']),
+                "storage_path": path,
+                "kind": "document",
+                "mime_type": str(row["mime_type"]),
+                "expected_sha256": str(row["sha256"]),
+                "expected_size_bytes": int(row["size_bytes"]),
             }
         for row in artifacts:
-            path = str(row['storage_path'])
+            path = str(row["storage_path"])
             inventory.setdefault(
                 path,
                 {
-                    'storage_path': path,
-                    'kind': 'artifact',
-                    'mime_type': str(row['mime_type']),
-                    'expected_sha256': None,
-                    'expected_size_bytes': None,
+                    "storage_path": path,
+                    "kind": "artifact",
+                    "mime_type": str(row["mime_type"]),
+                    "expected_sha256": None,
+                    "expected_size_bytes": None,
                 },
             )
         for row in messages:
-            for attachment in json.loads(row['attachments_json'] or '[]'):
-                path = attachment.get('storage_path')
+            for attachment in json.loads(row["attachments_json"] or "[]"):
+                path = attachment.get("storage_path")
                 if not path:
                     continue
                 path = str(path)
                 inventory.setdefault(
                     path,
                     {
-                        'storage_path': path,
-                        'kind': str(attachment.get('kind') or 'attachment'),
-                        'mime_type': str(
-                            attachment.get('mime_type')
-                            or 'application/octet-stream'
+                        "storage_path": path,
+                        "kind": str(attachment.get("kind") or "attachment"),
+                        "mime_type": str(
+                            attachment.get("mime_type") or "application/octet-stream"
                         ),
-                        'expected_sha256': attachment.get('sha256'),
-                        'expected_size_bytes': attachment.get('size_bytes'),
+                        "expected_sha256": attachment.get("sha256"),
+                        "expected_size_bytes": attachment.get("size_bytes"),
                     },
                 )
         return [inventory[path] for path in sorted(inventory)]
@@ -425,18 +429,14 @@ class PilotStore:
             projects = [
                 dict(row)
                 for row in connection.execute(
-                    self._sql(
-                        "SELECT * FROM projects WHERE owner_user_id = ?"
-                    ),
+                    self._sql("SELECT * FROM projects WHERE owner_user_id = ?"),
                     (user_id,),
                 ).fetchall()
             ]
             conversations = [
                 dict(row)
                 for row in connection.execute(
-                    self._sql(
-                        "SELECT * FROM conversations WHERE owner_user_id = ?"
-                    ),
+                    self._sql("SELECT * FROM conversations WHERE owner_user_id = ?"),
                     (user_id,),
                 ).fetchall()
             ]
@@ -456,18 +456,14 @@ class PilotStore:
             documents = [
                 dict(row)
                 for row in connection.execute(
-                    self._sql(
-                        "SELECT * FROM documents WHERE owner_user_id = ?"
-                    ),
+                    self._sql("SELECT * FROM documents WHERE owner_user_id = ?"),
                     (user_id,),
                 ).fetchall()
             ]
             artifacts = [
                 dict(row)
                 for row in connection.execute(
-                    self._sql(
-                        "SELECT * FROM artifacts WHERE owner_user_id = ?"
-                    ),
+                    self._sql("SELECT * FROM artifacts WHERE owner_user_id = ?"),
                     (user_id,),
                 ).fetchall()
             ]
@@ -496,9 +492,7 @@ class PilotStore:
                     message.pop(field) or "[]"
                 )
         for artifact in artifacts:
-            artifact["metadata"] = json.loads(
-                artifact.pop("metadata_json") or "{}"
-            )
+            artifact["metadata"] = json.loads(artifact.pop("metadata_json") or "{}")
         return {
             "exported_at": utc_now(),
             "user": user,
@@ -617,9 +611,7 @@ class PilotStore:
             if cursor.rowcount != 1:
                 raise ValueError("Project not found")
 
-    def project_storage_paths(
-        self, owner_user_id: str, project_id: str
-    ) -> list[str]:
+    def project_storage_paths(self, owner_user_id: str, project_id: str) -> list[str]:
         """Return private objects that will be removed with a project."""
 
         documents = self.list_documents(owner_user_id, project_id)
