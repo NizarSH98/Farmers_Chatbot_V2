@@ -34,12 +34,71 @@ class ModeProfile:
     max_tool_rounds: int
 
 
+@dataclass(frozen=True)
+class ModelOption:
+    id: str
+    label: str
+    description: str
+    supports_images: bool
+
+
+MODEL_CATALOG: dict[str, ModelOption] = {
+    "google/gemini-3.6-flash": ModelOption(
+        id="google/gemini-3.6-flash",
+        label="Gemini 3.6 Flash",
+        description="Fast multimodal model for routine text and visual questions.",
+        supports_images=True,
+    ),
+    "xiaomi/mimo-v2.5": ModelOption(
+        id="xiaomi/mimo-v2.5",
+        label="MiMo V2.5",
+        description="Efficient multimodal model for routine and visual questions.",
+        supports_images=True,
+    ),
+    "minimax/minimax-m3": ModelOption(
+        id="minimax/minimax-m3",
+        label="MiniMax M3",
+        description="Balanced multimodal model for analysis and artifacts.",
+        supports_images=True,
+    ),
+    "moonshotai/kimi-k3": ModelOption(
+        id="moonshotai/kimi-k3",
+        label="Kimi K3",
+        description="Deep multimodal reasoning; slower and more expensive.",
+        supports_images=True,
+    ),
+}
+
+
 DEFAULT_FAST_MODEL = os.getenv(
-    "OPENROUTER_FAST_MODEL", "google/gemini-2.5-flash-lite"
+    "OPENROUTER_FAST_MODEL", "google/gemini-3.6-flash"
 )
 DEFAULT_DEEP_MODEL = os.getenv(
-    "OPENROUTER_DEEP_MODEL", "openai/gpt-5.4-mini"
+    "OPENROUTER_DEEP_MODEL", "moonshotai/kimi-k3"
 )
+_configured_allowed_models = tuple(
+    model.strip()
+    for model in os.getenv("OPENROUTER_ALLOWED_MODELS", "").split(",")
+    if model.strip()
+)
+OPENROUTER_UNKNOWN_MODELS = tuple(
+    model for model in _configured_allowed_models if model not in MODEL_CATALOG
+)
+OPENROUTER_ALLOWED_MODELS = tuple(
+    model for model in _configured_allowed_models if model in MODEL_CATALOG
+) or tuple(MODEL_CATALOG)
+OPENROUTER_DEFAULT_MODEL = os.getenv(
+    "OPENROUTER_DEFAULT_MODEL", DEFAULT_FAST_MODEL
+).strip()
+
+
+def resolve_model_id(requested: str | None, fallback: str) -> str:
+    """Resolve a requested model through the server-controlled allowlist."""
+
+    candidate = (requested or fallback or OPENROUTER_DEFAULT_MODEL).strip()
+    if candidate not in OPENROUTER_ALLOWED_MODELS:
+        raise ValueError("Requested model is not enabled by the server")
+    return candidate
 
 
 MODE_PROFILES: dict[str, ModeProfile] = {
@@ -101,6 +160,12 @@ MODE_PROFILES: dict[str, ModeProfile] = {
 OPENROUTER_API_URL = os.getenv(
     "OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions"
 )
+OPENROUTER_ENFORCE_ZDR = (
+    os.getenv("OPENROUTER_ENFORCE_ZDR", "true").lower() == "true"
+)
+OPENROUTER_DATA_COLLECTION = os.getenv(
+    "OPENROUTER_DATA_COLLECTION", "deny"
+).lower()
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
 APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()

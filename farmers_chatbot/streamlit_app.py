@@ -14,7 +14,7 @@ from typing import Any
 
 import streamlit as st
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .artifacts import ArtifactService
 from .auth import IdentityError, UserIdentity, current_streamlit_identity
@@ -25,6 +25,9 @@ from .config import (
     CONSENT_VERSION,
     MAX_CHAT_IMAGE_BYTES,
     MODE_PROFILES,
+    MODEL_CATALOG,
+    OPENROUTER_ALLOWED_MODELS,
+    OPENROUTER_DEFAULT_MODEL,
     PRIVACY_CONTACT_EMAIL,
     RETENTION_DAYS,
 )
@@ -83,6 +86,11 @@ def get_services() -> tuple[
 def _mode_label(key: str) -> str:
     profile = MODE_PROFILES[key]
     return f"{profile.label_en} / {profile.label_ar}"
+
+
+def _model_label(model_id: str) -> str:
+    option = MODEL_CATALOG[model_id]
+    return f"{option.label} — {option.id}"
 
 
 def _init_state() -> None:
@@ -549,7 +557,7 @@ def render_sidebar(
     user: dict[str, Any],
     store: PilotStore,
     storage: PrivateFileStorage,
-) -> tuple[str, str, str | None, str]:
+) -> tuple[str, str, str, str | None, str]:
     with st.sidebar:
         st.markdown("## RAISE 🌿")
         st.caption(f"{identity.name} · {identity.email or 'WhatsApp identity'}")
@@ -567,6 +575,20 @@ def render_sidebar(
             index=list(MODE_PROFILES).index(configured_mode),
             format_func=_mode_label,
         )
+        available_models = list(OPENROUTER_ALLOWED_MODELS)
+        preferred_model = (
+            OPENROUTER_DEFAULT_MODEL
+            if OPENROUTER_DEFAULT_MODEL in available_models
+            else MODE_PROFILES[mode_key].model
+        )
+        if preferred_model not in available_models:
+            preferred_model = available_models[0]
+        model_id = st.selectbox(
+            "AI model / نموذج الذكاء الاصطناعي",
+            available_models,
+            index=available_models.index(preferred_model),
+            format_func=_model_label,
+        )
         configured_style = user.get("clarification_style", "auto")
         if configured_style not in CLARIFICATION_STYLES:
             configured_style = "auto"
@@ -577,9 +599,10 @@ def render_sidebar(
             format_func=CLARIFICATION_STYLES.get,
         )
         profile = MODE_PROFILES[mode_key]
+        model_option = MODEL_CATALOG[model_id]
         st.caption(
-            f"{profile.description} Model: `{profile.model}` · "
-            f"reasoning: `{profile.reasoning_effort}`"
+            f"{profile.description} {model_option.description} "
+            f"Reasoning: `{profile.reasoning_effort}`."
         )
         st.metric("Queries remaining today", st.session_state.remaining_queries)
 
@@ -599,7 +622,7 @@ def render_sidebar(
                 performance = store.performance_summary()
                 feedback = store.feedback_summary()
                 st.json({**performance, **feedback})
-    return mode_key, clarification_style, project_id, conversation_id
+    return mode_key, clarification_style, model_id, project_id, conversation_id
 
 
 def render_citations(citations: list[dict[str, Any]]) -> None:
@@ -771,10 +794,28 @@ def _prepare_chat_image(
     if upload.type not in {"image/jpeg", "image/png"}:
         raise ValueError("Only JPG and PNG chat images are accepted")
     try:
-        image = Image.open(io.BytesIO(data))
-        image.verify()
+        with Image.open(io.BytesIO(data)) as uploaded_image:
+            uploaded_image.load()
+            if uploaded_image.width * uploaded_image.height > 24_000_000:
+                raise ValueError("Image dimensions are too large")
+            image = ImageOps.exif_transpose(uploaded_image)
+            image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+            normalized = io.BytesIO()
+            if upload.type == "image/png":
+                mode = "RGBA" if "A" in image.getbands() else "RGB"
+                image.convert(mode).save(normalized, format="PNG", optimize=True)
+            else:
+                image.convert("RGB").save(
+                    normalized,
+                    format="JPEG",
+                    quality=90,
+                    optimize=True,
+                )
+            data = normalized.getvalue()
     except Exception as exc:
         raise ValueError("Image file is invalid") from exc
+    if not data or len(data) > MAX_CHAT_IMAGE_BYTES:
+        raise ValueError("Normalized image is larger than 5 MB")
     extension = ".png" if upload.type == "image/png" else ".jpg"
     storage_path = (
         f"users/{identity.user_id}/conversations/{conversation_id}/images/"
@@ -813,7 +854,13 @@ def main() -> None:
         return
     identity, user = identity_result
     render_consent(identity, store)
-    mode_key, clarification_style, project_id, conversation_id = render_sidebar(
+    (
+        mode_key,
+        clarification_style,
+        model_id,
+        project_id,
+        conversation_id,
+    ) = render_sidebar(
         identity,
         user,
         store,
@@ -845,11 +892,20 @@ def main() -> None:
             st.session_state.pending_prompt = previous_user
             st.rerun()
 
-    with st.expander("Attach a crop/farm image / أرفق صورة", expanded=False):
-        chat_image = st.file_uploader(
-            "JPG or PNG, maximum 5 MB; no definitive diagnosis is made from an image.",
-            type=["jpg", "jpeg", "png"],
-            key=f"chat_image_{st.session_state.image_uploader_version}",
+    model_supports_images = MODEL_CATALOG[model_id].supports_images
+    if model_supports_images:
+        with st.expander("Attach a crop/farm image / أرفق صورة", expanded=False):
+            chat_image = st.file_uploader(
+                "JPG or PNG, maximum 5 MB; no definitive diagnosis is made from an image.",
+                type=["jpg", "jpeg", "png"],
+                key=f"chat_image_{st.session_state.image_uploader_version}",
+            )
+    else:
+        chat_image = None
+        st.caption(
+            "Image input is disabled for this model because its pilot vision "
+            "compatibility check did not pass. Choose MiMo, MiniMax, or Kimi "
+            "to attach a field image."
         )
 
     user_input = st.chat_input(
@@ -949,6 +1005,7 @@ def main() -> None:
         text=user_input,
         attachments=((model_attachment,) if model_attachment else ()),
         mode=mode_key,
+        model_id=model_id,
         clarification_style=clarification_style,
         project_instructions=project_instructions,
     )

@@ -68,6 +68,9 @@ def main() -> int:
         'AUTH_MODE',
         'CONSENT_VERSION',
         'DATABASE_URL',
+        'OPENROUTER_ALLOWED_MODELS',
+        'OPENROUTER_DEFAULT_MODEL',
+        'OPENROUTER_ENFORCE_ZDR',
         'PRIVACY_CONTACT_EMAIL',
         'SUPABASE_SERVICE_ROLE_KEY',
     ):
