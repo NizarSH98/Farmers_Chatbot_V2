@@ -13,6 +13,8 @@ import requests
 from .config import (
     ENABLE_TRUSTED_WEB_SEARCH,
     OPENROUTER_API_URL,
+    OPENROUTER_DATA_COLLECTION,
+    OPENROUTER_ENFORCE_ZDR,
     TRUSTED_SEARCH_MAX_CALLS,
     TRUSTED_SEARCH_MAX_RESULTS,
     TRUSTED_SEARCH_MODEL,
@@ -191,6 +193,10 @@ class TrustedSourceClient:
             "temperature": 0,
             "max_tokens": 550,
             "reasoning": {"effort": "low", "exclude": True},
+            "provider": {
+                "data_collection": OPENROUTER_DATA_COLLECTION,
+                "zdr": OPENROUTER_ENFORCE_ZDR,
+            },
             "tools": [
                 {
                     "type": "openrouter:web_search",

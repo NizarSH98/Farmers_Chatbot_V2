@@ -16,6 +16,13 @@ from .config import (
     AUTH_MODE,
     CONSENT_VERSION,
     DATABASE_URL,
+    DEFAULT_DEEP_MODEL,
+    DEFAULT_FAST_MODEL,
+    OPENROUTER_ALLOWED_MODELS,
+    OPENROUTER_DATA_COLLECTION,
+    OPENROUTER_DEFAULT_MODEL,
+    OPENROUTER_ENFORCE_ZDR,
+    OPENROUTER_UNKNOWN_MODELS,
     ORGANIZATION_NAME,
     PRIVACY_CONTACT_EMAIL,
     RETENTION_DAYS,
@@ -57,6 +64,18 @@ def validate_web_runtime() -> None:
         missing.append("SUPABASE_STORAGE_BUCKET")
     if not os.getenv("OPENROUTER_API_KEY"):
         missing.append("OPENROUTER_API_KEY")
+    if OPENROUTER_UNKNOWN_MODELS:
+        missing.append("OPENROUTER_ALLOWED_MODELS (contains unsupported IDs)")
+    if OPENROUTER_DEFAULT_MODEL not in OPENROUTER_ALLOWED_MODELS:
+        missing.append("OPENROUTER_DEFAULT_MODEL (must be allowed)")
+    if DEFAULT_FAST_MODEL not in OPENROUTER_ALLOWED_MODELS:
+        missing.append("OPENROUTER_FAST_MODEL (must be allowed)")
+    if DEFAULT_DEEP_MODEL not in OPENROUTER_ALLOWED_MODELS:
+        missing.append("OPENROUTER_DEEP_MODEL (must be allowed)")
+    if not OPENROUTER_ENFORCE_ZDR:
+        missing.append("OPENROUTER_ENFORCE_ZDR=true")
+    if OPENROUTER_DATA_COLLECTION != "deny":
+        missing.append("OPENROUTER_DATA_COLLECTION=deny")
     if not ORGANIZATION_NAME:
         missing.append("ORGANIZATION_NAME")
     if not APP_DISPLAY_NAME:

@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import requests
 
-from .config import MODE_PROFILES, OPENROUTER_API_URL, ModeProfile
+from .config import (
+    MODE_PROFILES,
+    OPENROUTER_API_URL,
+    OPENROUTER_DATA_COLLECTION,
+    OPENROUTER_ENFORCE_ZDR,
+    ModeProfile,
+    resolve_model_id,
+)
 from .documents import ProjectSearchResult, search_project_chunks
 from .knowledge import KnowledgeIndex, SearchResult
 from .language import detect_language
@@ -30,6 +37,7 @@ class AssistantRequest:
     text: str
     attachments: tuple[dict[str, Any], ...] = ()
     mode: str = "standard"
+    model_id: str | None = None
     clarification_style: str = "auto"
     project_instructions: str = ""
 
@@ -91,6 +99,7 @@ class AssistantService:
         return self.answer(
             request.text,
             mode_key=request.mode,
+            model_id=request.model_id,
             clarification_style=request.clarification_style,
             conversation_history=conversation_history,
             attachments=list(request.attachments),
@@ -102,6 +111,7 @@ class AssistantService:
         query: str,
         *,
         mode_key: str = "standard",
+        model_id: str | None = None,
         clarification_style: str = "auto",
         conversation_history: list[dict[str, str]] | None = None,
         attachments: list[dict[str, Any]] | None = None,
@@ -109,6 +119,10 @@ class AssistantService:
     ) -> AssistantResponse:
         started = time.perf_counter()
         profile = MODE_PROFILES.get(mode_key, MODE_PROFILES["standard"])
+        profile = replace(
+            profile,
+            model=resolve_model_id(model_id, profile.model),
+        )
         if clarification_style not in CLARIFICATION_STYLES:
             clarification_style = "auto"
         language = detect_language(query)
@@ -199,6 +213,10 @@ class AssistantService:
                         "effort": profile.reasoning_effort,
                         "exclude": True,
                     },
+                    "provider": {
+                        "data_collection": OPENROUTER_DATA_COLLECTION,
+                        "zdr": OPENROUTER_ENFORCE_ZDR,
+                    },
                 }
                 if round_number < profile.max_tool_rounds:
                     payload["tools"] = self.tools.model_definitions()
@@ -267,13 +285,10 @@ class AssistantService:
                         trusted_searches=self.tools.trusted_search_requests,
                     )
 
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": message.get("content"),
-                        "tool_calls": tool_calls,
-                    }
-                )
+                # Preserve provider reasoning metadata required by some models to
+                # continue safely after a tool result. Hidden reasoning is still
+                # excluded from the user-facing response.
+                messages.append(dict(message))
                 for tool_call in tool_calls[:1]:
                     name = tool_call.get("function", {}).get("name", "")
                     raw_arguments = tool_call.get("function", {}).get("arguments", "{}")

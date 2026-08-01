@@ -1,6 +1,6 @@
 # Deployment and Pilot Release
 
-Last updated: 2026-07-29
+Last updated: 2026-08-01
 
 > For the authenticated Streamlit/Supabase/Google and Meta test-number pilot,
 > use `docs/PILOT_DEPLOYMENT_RUNBOOK.md`. This older checklist remains as the
@@ -37,15 +37,21 @@ Last updated: 2026-07-29
    OPENROUTER_API_KEY = "deployment-only-key"
    APP_ENV = "pilot"
    APP_PUBLIC_URL = "https://your-app.streamlit.app"
-   OPENROUTER_FAST_MODEL = "google/gemini-2.5-flash-lite"
-   OPENROUTER_DEEP_MODEL = "openai/gpt-5.4-mini"
+   OPENROUTER_DEFAULT_MODEL = "google/gemini-3.6-flash"
+   OPENROUTER_ALLOWED_MODELS = "google/gemini-3.6-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,moonshotai/kimi-k3"
+   OPENROUTER_FAST_MODEL = "google/gemini-3.6-flash"
+   OPENROUTER_DEEP_MODEL = "moonshotai/kimi-k3"
+   OPENROUTER_ENFORCE_ZDR = true
+   OPENROUTER_DATA_COLLECTION = "deny"
    MAX_QUERIES_PER_SESSION = 25
    MAX_QUERIES_PER_DAY_GLOBAL = 300
    COOLDOWN_SECONDS = 3
    ```
 
-6. Deploy and review build logs.
-7. Execute smoke, retrieval, safety, latency, and fallback checks.
+6. Set `SUPABASE_URL` to the project origin only:
+   `https://PROJECT-REF.supabase.co`, with no dashboard or API path.
+7. Deploy and review build logs.
+8. Execute smoke, retrieval, safety, latency, and fallback checks.
 
 The local SQLite store is suitable for development and a single-instance controlled run. It is not the final evidence store for multi-replica or durable production use.
 
