@@ -41,7 +41,7 @@ def test_pilot_runtime_accepts_complete_allowlisted_configuration(monkeypatch):
 def test_pilot_runtime_accepts_open_google_configuration(monkeypatch):
     monkeypatch.setattr(guard, "APP_ENV", "pilot")
     monkeypatch.setattr(guard, "APP_PUBLIC_URL", "https://raise.streamlit.app")
-    monkeypatch.setattr(guard, "APP_DISPLAY_NAME", "RAISE-ESDU Farmer Assistant")
+    monkeypatch.setattr(guard, "APP_DISPLAY_NAME", "RAISE")
     monkeypatch.setattr(guard, "AUTH_MODE", "google")
     monkeypatch.setattr(guard, "ACCESS_POLICY", "google_any")
     monkeypatch.setattr(guard, "ALLOWED_EMAILS", frozenset())

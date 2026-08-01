@@ -103,9 +103,7 @@ OPENROUTER_API_URL = os.getenv(
 )
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
-APP_DISPLAY_NAME = os.getenv(
-    "APP_DISPLAY_NAME", "RAISE-ESDU Farmer Assistant"
-).strip()
+APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()
 AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
 ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")

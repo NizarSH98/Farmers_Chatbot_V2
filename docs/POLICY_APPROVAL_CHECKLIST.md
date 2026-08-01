@@ -25,7 +25,7 @@ managed `CONSENT_VERSION` must exactly match the policy version in the code.
 ## Confirmed project decisions
 
 - Operational name: RAISE-ESDU
-- Application name: RAISE-ESDU Farmer Assistant
+- Application name: RAISE
 - Public privacy contact: supplied by the project operator through managed secrets
 - Access: any verified Google account may register
 - Administrators: one separately configured email
