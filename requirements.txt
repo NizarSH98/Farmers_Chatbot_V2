@@ -17,4 +17,4 @@ openpyxl>=3.1,<4
 Pillow>=11,<13
 
 # Kept temporarily for the legacy PDF migration and comparison scripts.
-PyPDF2>=3,<4
+PyPDF2>=3.9,<4
