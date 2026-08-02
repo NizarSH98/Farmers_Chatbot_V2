@@ -1,7 +1,7 @@
 streamlit==1.56.0
 python-dotenv>=1,<2
 requests>=2.31,<3
-httpx>=0.28,<1
+httpx[http2]>=0.28,<1
 scikit-learn>=1.6,<2
 numpy>=1.26,<3
 edge-tts>=7,<8
