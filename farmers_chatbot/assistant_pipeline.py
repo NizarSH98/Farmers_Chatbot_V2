@@ -41,6 +41,7 @@ class RequestAnalysis:
     missing_fields: tuple[str, ...]
     needs_clarification: bool
     clarification_question: str | None
+    clarification_options: tuple[str, ...] = ()
     retrieval_queries: tuple[str, ...]
     evidence_requirements: tuple[str, ...]
     output_shape: str
@@ -57,6 +58,7 @@ class RequestAnalysis:
             "missing_fields": list(self.missing_fields),
             "needs_clarification": self.needs_clarification,
             "clarification_question": self.clarification_question,
+            "clarification_options": list(self.clarification_options),
             "retrieval_queries": list(self.retrieval_queries),
             "evidence_requirements": list(self.evidence_requirements),
             "output_shape": self.output_shape,
@@ -236,6 +238,7 @@ class AsyncAssistantPipeline:
                 {
                     "content": content,
                     "missing_fields": list(analysis.missing_fields),
+                    "options": list(analysis.clarification_options),
                 },
             )
             yield PipelineEvent(
@@ -449,10 +452,18 @@ class AsyncAssistantPipeline:
                         "Return JSON only with intent, decision, domain, risk "
                         "(low|medium|high), currentness (stable|current), location, "
                         "missing_fields, needs_clarification, clarification_question, "
+                        "clarification_options (array of 2-4 short suggested answers "
+                        "the user can pick from), "
                         "retrieval_queries, evidence_requirements, output_shape, and "
                         "assumptions. Ask only when missing context materially changes "
                         "safety or usefulness. Ask at most two details in accessible "
-                        "language. Do not include reasoning or chain-of-thought."
+                        "language. When clarifying, always provide 2-4 short options "
+                        "the user can choose from. "
+                        "If clarifications_already_asked >= 1 and the user gave a "
+                        "vague or deflecting reply (e.g. 'you choose', 'anything', "
+                        "'I don't know'), set needs_clarification to false and fill "
+                        "assumptions with what you assumed instead. "
+                        "Do not include reasoning or chain-of-thought."
                     ),
                 },
                 {
@@ -645,15 +656,27 @@ class AsyncAssistantPipeline:
         needs = (
             ambiguous
             and clarification_style != "direct"
-            and clarification_count < 3
+            and clarification_count < 1
         )
         question = None
+        options: tuple[str, ...] = ()
         if needs:
-            question = (
-                "ما الموضوع الذي تريد المساعدة فيه، وما النتيجة التي تحاول الوصول إليها؟"
-                if language == "arabic"
-                else "What do you need help with, and what outcome are you trying to reach?"
-            )
+            if language == "arabic":
+                question = "ما الموضوع الذي تريد المساعدة فيه؟"
+                options = (
+                    "زراعة خضروات",
+                    "تربية مواشي أو دواجن",
+                    "تخطيط مشروع زراعي",
+                    "مكافحة آفات أو أمراض",
+                )
+            else:
+                question = "What do you need help with?"
+                options = (
+                    "Growing vegetables",
+                    "Livestock or poultry",
+                    "Farm project planning",
+                    "Pest or disease control",
+                )
         return RequestAnalysis(
             intent="decision_support",
             decision="Provide practical guidance",
@@ -664,6 +687,7 @@ class AsyncAssistantPipeline:
             missing_fields=("topic", "desired_outcome") if needs else (),
             needs_clarification=needs,
             clarification_question=question,
+            clarification_options=options,
             retrieval_queries=(query,),
             evidence_requirements=(
                 ("trusted_current_source",) if current or high_risk else ("raise",)
@@ -690,11 +714,18 @@ class AsyncAssistantPipeline:
         needs = bool(value.get("needs_clarification"))
         if clarification_style == "direct" and risk != "high":
             needs = False
-        if clarification_count >= 3:
+        if clarification_count >= 1:
             needs = False
         question = str(value.get("clarification_question") or "").strip() or None
         if needs and not question:
             question = fallback.clarification_question
+        options = tuple(
+            str(item).strip()[:120]
+            for item in value.get("clarification_options") or []
+            if str(item).strip()
+        )[:4]
+        if needs and not options:
+            options = fallback.clarification_options
         queries = tuple(
             str(item).strip()[:500]
             for item in value.get("retrieval_queries") or []
@@ -714,6 +745,7 @@ class AsyncAssistantPipeline:
             )[:6],
             needs_clarification=needs and bool(question),
             clarification_question=question if needs else None,
+            clarification_options=options if needs else (),
             retrieval_queries=queries,
             evidence_requirements=tuple(
                 str(item).strip()[:100]

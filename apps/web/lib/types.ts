@@ -55,6 +55,7 @@ export interface Message {
   language?: string;
   model?: string;
   warning?: string;
+  quickReplies?: string[];
   citations: Citation[];
   tools: string[];
   attachments: Array<{

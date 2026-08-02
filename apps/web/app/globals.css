@@ -817,6 +817,48 @@ svg {
   width: 16px;
 }
 
+.quick-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  max-width: 420px;
+}
+
+.quick-reply-btn {
+  align-items: center;
+  background: var(--sand-50);
+  border: 1px solid var(--sand-200);
+  border-radius: 10px;
+  color: var(--ink-800);
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  gap: 10px;
+  padding: 10px 14px;
+  text-align: start;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.quick-reply-btn:hover {
+  background: var(--forest-50);
+  border-color: var(--forest-300);
+}
+
+.quick-reply-number {
+  align-items: center;
+  background: var(--forest-600);
+  border-radius: 6px;
+  color: #fff;
+  display: flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
 .stage-indicator {
   align-items: center;
   color: var(--ink-500);

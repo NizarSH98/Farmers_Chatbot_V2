@@ -347,9 +347,11 @@ export function ChatWorkspace() {
         } else if (event.event === "content.delta") {
           appendPending(assistantId, String(event.data.text || ""));
         } else if (event.event === "clarification") {
+          const options = Array.isArray(event.data.options) ? event.data.options.map(String) : [];
           patchPending(assistantId, {
             content: String(event.data.content || ""),
-            status: "clarification"
+            status: "clarification",
+            quickReplies: options.length > 0 ? options : undefined
           });
         } else if (event.event === "warning") {
           patchPending(assistantId, { warning: String(event.data.message || "") });
@@ -737,6 +739,21 @@ export function ChatWorkspace() {
                           ))}
                         </ol>
                       </details>
+                    )}
+                    {message.quickReplies && message.quickReplies.length > 0 && !sending && (
+                      <div className="quick-replies">
+                        {message.quickReplies.map((reply, replyIndex) => (
+                          <button
+                            key={replyIndex}
+                            className="quick-reply-btn"
+                            onClick={() => void submit(reply)}
+                            type="button"
+                          >
+                            <span className="quick-reply-number">{replyIndex + 1}</span>
+                            {reply}
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {message.role === "assistant" && message.content && (
                       <div className="message-actions">
