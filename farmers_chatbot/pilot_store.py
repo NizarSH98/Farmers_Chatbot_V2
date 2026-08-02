@@ -17,6 +17,8 @@ from typing import Any
 from .auth import UserIdentity
 from .config import (
     CONSENT_VERSION,
+    DATABASE_POOL_MAX_SIZE,
+    DATABASE_POOL_MIN_SIZE,
     DATABASE_URL,
     LOCAL_PILOT_DB_PATH,
     MAX_ARTIFACTS_PER_USER_DAY,
@@ -56,6 +58,22 @@ class PilotStore:
         self.is_postgres = self.database_url.startswith(
             ("postgres://", "postgresql://")
         )
+        self._pool: Any | None = None
+        if self.is_postgres:
+            try:
+                from psycopg.rows import dict_row
+                from psycopg_pool import ConnectionPool
+            except ImportError as exc:  # pragma: no cover - deployment dependency
+                raise RuntimeError(
+                    "PostgreSQL support requires psycopg and psycopg-pool"
+                ) from exc
+            self._pool = ConnectionPool(
+                conninfo=self.database_url,
+                min_size=max(1, DATABASE_POOL_MIN_SIZE),
+                max_size=max(DATABASE_POOL_MIN_SIZE, DATABASE_POOL_MAX_SIZE),
+                kwargs={"row_factory": dict_row},
+                open=True,
+            )
         if not self.is_postgres:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -63,12 +81,9 @@ class PilotStore:
     @contextmanager
     def _connect(self) -> Iterator[Any]:
         if self.is_postgres:
-            try:
-                import psycopg
-                from psycopg.rows import dict_row
-            except ImportError as exc:  # pragma: no cover - deployment dependency
-                raise RuntimeError("PostgreSQL support requires psycopg") from exc
-            with psycopg.connect(self.database_url, row_factory=dict_row) as connection:
+            if self._pool is None:  # pragma: no cover - defensive guard
+                raise RuntimeError("PostgreSQL pool is not initialized")
+            with self._pool.connection() as connection:
                 yield connection
             return
 
@@ -84,15 +99,16 @@ class PilotStore:
     def _sql(self, statement: str) -> str:
         return statement.replace("?", "%s") if self.is_postgres else statement
 
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.close()
+
     def _initialize(self) -> None:
         if self.is_postgres:
-            migration = (
-                Path(__file__).resolve().parents[1]
-                / "migrations"
-                / "001_pilot_schema.sql"
-            )
+            migrations = Path(__file__).resolve().parents[1] / "migrations"
             with self._connect() as connection:
-                connection.execute(migration.read_text(encoding="utf-8"))
+                for migration in sorted(migrations.glob("*.sql")):
+                    connection.execute(migration.read_text(encoding="utf-8"))
             return
 
         with self._connect() as connection:
@@ -102,6 +118,7 @@ class PilotStore:
                     id TEXT PRIMARY KEY,
                     issuer TEXT NOT NULL,
                     subject TEXT NOT NULL,
+                    auth_user_id TEXT,
                     email TEXT,
                     name TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'user',
@@ -112,6 +129,8 @@ class PilotStore:
                     last_seen_at TEXT NOT NULL,
                     UNIQUE (issuer, subject)
                 );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id
+                    ON users(auth_user_id);
                 CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY,
                     owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -207,12 +226,45 @@ class PilotStore:
                     duration_ms INTEGER,
                     success INTEGER,
                     error_type TEXT,
-                    trusted_searches INTEGER NOT NULL DEFAULT 0
+                    trusted_searches INTEGER NOT NULL DEFAULT 0,
+                    request_id TEXT,
+                    ttft_ms INTEGER,
+                    stage_durations_json TEXT NOT NULL DEFAULT '{}',
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    estimated_cost_usd REAL
                 );
                 CREATE INDEX IF NOT EXISTS idx_pilot_query_day
                     ON query_events(day_utc);
                 CREATE INDEX IF NOT EXISTS idx_pilot_query_user
                     ON query_events(user_id, occurred_at);
+                CREATE TABLE IF NOT EXISTS uploads (
+                    id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    storage_path TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ready',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_uploads_owner_created
+                    ON uploads(owner_user_id, created_at);
+                CREATE TABLE IF NOT EXISTS assistant_turns (
+                    id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+                    assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+                    status TEXT NOT NULL,
+                    clarification_count INTEGER NOT NULL DEFAULT 0,
+                    analysis_json TEXT NOT NULL DEFAULT '{}',
+                    error_type TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_assistant_turns_conversation
+                    ON assistant_turns(conversation_id, created_at);
                 CREATE TABLE IF NOT EXISTS whatsapp_events (
                     message_id TEXT PRIMARY KEY,
                     identity_hash TEXT NOT NULL,
@@ -223,6 +275,37 @@ class PilotStore:
                 );
                 """
             )
+            self._ensure_sqlite_upgrades(connection)
+
+    @staticmethod
+    def _ensure_sqlite_upgrades(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(users)")
+        }
+        if "auth_user_id" not in columns:
+            connection.execute("ALTER TABLE users ADD COLUMN auth_user_id TEXT")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id "
+                "ON users(auth_user_id)"
+            )
+
+        query_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(query_events)")
+        }
+        additions = {
+            "request_id": "TEXT",
+            "ttft_ms": "INTEGER",
+            "stage_durations_json": "TEXT NOT NULL DEFAULT '{}'",
+            "prompt_tokens": "INTEGER",
+            "completion_tokens": "INTEGER",
+            "estimated_cost_usd": "REAL",
+        }
+        for name, definition in additions.items():
+            if name not in query_columns:
+                connection.execute(
+                    f"ALTER TABLE query_events ADD COLUMN {name} {definition}"
+                )
 
     def upsert_user(self, identity: UserIdentity) -> dict[str, Any]:
         now = utc_now()
@@ -268,6 +351,96 @@ class PilotStore:
                 )
         return self.get_user(user_id)
 
+    def upsert_supabase_user(
+        self,
+        *,
+        auth_user_id: str,
+        email: str,
+        name: str,
+        google_subject: str | None,
+        is_admin: bool,
+    ) -> dict[str, Any]:
+        """Link a verified Supabase identity without using email as a key."""
+
+        auth_user_id = auth_user_id.strip()
+        if not auth_user_id:
+            raise ValueError("Supabase identity is missing its subject")
+        now = utc_now()
+        role = "admin" if is_admin else "user"
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
+                (auth_user_id,),
+            ).fetchone()
+            if not row and google_subject:
+                row = connection.execute(
+                    self._sql(
+                        """
+                        SELECT * FROM users
+                        WHERE issuer IN ('accounts.google.com',
+                                         'https://accounts.google.com')
+                          AND subject = ?
+                        """
+                    ),
+                    (google_subject,),
+                ).fetchone()
+            if row:
+                connection.execute(
+                    self._sql(
+                        """
+                        UPDATE users
+                        SET auth_user_id = ?, email = ?, name = ?, role = ?,
+                            last_seen_at = ?
+                        WHERE id = ?
+                        """
+                    ),
+                    (
+                        auth_user_id,
+                        email or None,
+                        name[:200],
+                        role,
+                        now,
+                        row["id"],
+                    ),
+                )
+                user_id = str(row["id"])
+            else:
+                user_id = str(uuid.uuid4())
+                issuer = "https://accounts.google.com" if google_subject else "supabase"
+                subject = google_subject or auth_user_id
+                connection.execute(
+                    self._sql(
+                        """
+                        INSERT INTO users
+                            (id, issuer, subject, auth_user_id, email, name, role,
+                             created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """
+                    ),
+                    (
+                        user_id,
+                        issuer,
+                        subject,
+                        auth_user_id,
+                        email or None,
+                        name[:200],
+                        role,
+                        now,
+                        now,
+                    ),
+                )
+        return self.get_user(user_id)
+
+    def get_user_by_auth_id(self, auth_user_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
+                (auth_user_id,),
+            ).fetchone()
+        if not row:
+            raise ValueError("User not found")
+        return dict(row)
+
     def upsert_whatsapp_user(self, identity_hash: str) -> dict[str, Any]:
         identity = UserIdentity(
             user_id="",
@@ -310,7 +483,7 @@ class PilotStore:
         self.get_user(user_id)
         paths: list[str] = []
         with self._connect() as connection:
-            for table in ("documents", "artifacts"):
+            for table in ("documents", "artifacts", "uploads"):
                 rows = connection.execute(
                     self._sql(
                         f"SELECT storage_path FROM {table} WHERE owner_user_id = ?"
@@ -753,6 +926,26 @@ class PilotStore:
             if cursor.rowcount != 1:
                 raise ValueError("Conversation not found")
 
+    def set_conversation_archived(
+        self,
+        owner_user_id: str,
+        conversation_id: str,
+        archived: bool,
+    ) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                self._sql(
+                    """
+                    UPDATE conversations
+                    SET archived = ?, updated_at = ?
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (int(bool(archived)), utc_now(), conversation_id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Conversation not found")
+
     def rename_conversation(
         self,
         owner_user_id: str,
@@ -863,27 +1056,47 @@ class PilotStore:
             )
         return message_id
 
+    def owns_message(self, owner_user_id: str, message_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT 1
+                    FROM messages m
+                    JOIN conversations c ON c.id = m.conversation_id
+                    WHERE m.id = ? AND c.owner_user_id = ?
+                    """
+                ),
+                (message_id, owner_user_id),
+            ).fetchone()
+        return bool(row)
+
     def list_messages(
         self,
         owner_user_id: str,
         conversation_id: str,
         *,
         limit: int = 200,
+        before: str | None = None,
     ) -> list[dict[str, Any]]:
         self.get_conversation(owner_user_id, conversation_id)
+        clauses = ["conversation_id = ?"]
+        parameters: list[Any] = [conversation_id]
+        if before:
+            clauses.append("created_at < ?")
+            parameters.append(before)
+        parameters.append(max(1, min(int(limit), 500)))
         with self._connect() as connection:
             rows = connection.execute(
                 self._sql(
-                    """
-                    SELECT * FROM messages
-                    WHERE conversation_id = ?
-                    ORDER BY created_at ASC LIMIT ?
-                    """
+                    "SELECT * FROM messages WHERE "
+                    + " AND ".join(clauses)
+                    + " ORDER BY created_at DESC LIMIT ?"
                 ),
-                (conversation_id, max(1, min(int(limit), 500))),
+                parameters,
             ).fetchall()
         messages = []
-        for row in rows:
+        for row in reversed(rows):
             item = dict(row)
             for source, target in (
                 ("citations_json", "citations"),
@@ -894,6 +1107,154 @@ class PilotStore:
                 item[target] = json.loads(item.pop(source) or "[]")
             messages.append(item)
         return messages
+
+    def create_upload(
+        self,
+        owner_user_id: str,
+        *,
+        storage_path: str,
+        mime_type: str,
+        size_bytes: int,
+        expires_at: str,
+    ) -> str:
+        self.get_user(owner_user_id)
+        upload_id = str(uuid.uuid4())
+        with self._connect() as connection:
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO uploads
+                        (id, owner_user_id, storage_path, mime_type, size_bytes,
+                         status, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, 'ready', ?, ?)
+                    """
+                ),
+                (
+                    upload_id,
+                    owner_user_id,
+                    storage_path,
+                    mime_type,
+                    int(size_bytes),
+                    utc_now(),
+                    expires_at,
+                ),
+            )
+        return upload_id
+
+    def get_upload(self, owner_user_id: str, upload_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT * FROM uploads
+                    WHERE id = ? AND owner_user_id = ? AND status = 'ready'
+                    """
+                ),
+                (upload_id, owner_user_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Upload not found")
+        item = dict(row)
+        if datetime.fromisoformat(str(item["expires_at"])) <= datetime.now(UTC):
+            raise ValueError("Upload expired")
+        return item
+
+    def consume_upload(self, owner_user_id: str, upload_id: str) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                self._sql(
+                    """
+                    UPDATE uploads SET status = 'consumed'
+                    WHERE id = ? AND owner_user_id = ? AND status = 'ready'
+                    """
+                ),
+                (upload_id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Upload not found")
+
+    def create_assistant_turn(
+        self,
+        owner_user_id: str,
+        conversation_id: str,
+        *,
+        user_message_id: str,
+        clarification_count: int,
+    ) -> str:
+        self.get_conversation(owner_user_id, conversation_id)
+        turn_id = str(uuid.uuid4())
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO assistant_turns
+                        (id, owner_user_id, conversation_id, user_message_id,
+                         status, clarification_count, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'analyzing', ?, ?, ?)
+                    """
+                ),
+                (
+                    turn_id,
+                    owner_user_id,
+                    conversation_id,
+                    user_message_id,
+                    max(0, int(clarification_count)),
+                    now,
+                    now,
+                ),
+            )
+        return turn_id
+
+    def complete_assistant_turn(
+        self,
+        owner_user_id: str,
+        turn_id: str,
+        *,
+        status: str,
+        analysis: dict[str, Any],
+        assistant_message_id: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                self._sql(
+                    """
+                    UPDATE assistant_turns
+                    SET status = ?, analysis_json = ?, assistant_message_id = ?,
+                        error_type = ?, updated_at = ?
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (
+                    status,
+                    json.dumps(analysis, ensure_ascii=False),
+                    assistant_message_id,
+                    error_type,
+                    utc_now(),
+                    turn_id,
+                    owner_user_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Assistant turn not found")
+
+    def consecutive_clarifications(
+        self,
+        owner_user_id: str,
+        conversation_id: str,
+    ) -> int:
+        messages = self.list_messages(owner_user_id, conversation_id, limit=8)
+        count = 0
+        for message in reversed(messages):
+            if message["role"] == "assistant" and message["status"] == "clarification":
+                count += 1
+                continue
+            if message["role"] == "user" and count:
+                continue
+            if message["role"] == "assistant":
+                break
+        return count
 
     def document_count(self, owner_user_id: str, project_id: str) -> int:
         self.get_project(owner_user_id, project_id)
@@ -1207,6 +1568,12 @@ class PilotStore:
         success: bool,
         error_type: str | None = None,
         trusted_searches: int = 0,
+        request_id: str | None = None,
+        ttft_ms: int | None = None,
+        stage_durations: dict[str, int] | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        estimated_cost_usd: float | None = None,
     ) -> None:
         with self._connect() as connection:
             row = connection.execute(
@@ -1225,7 +1592,10 @@ class PilotStore:
                         """
                         UPDATE query_events
                         SET language = ?, duration_ms = ?, success = ?,
-                            error_type = ?, trusted_searches = ?
+                            error_type = ?, trusted_searches = ?,
+                            request_id = ?, ttft_ms = ?,
+                            stage_durations_json = ?, prompt_tokens = ?,
+                            completion_tokens = ?, estimated_cost_usd = ?
                         WHERE id = ?
                         """
                     ),
@@ -1235,6 +1605,20 @@ class PilotStore:
                         int(success),
                         error_type,
                         int(trusted_searches),
+                        request_id,
+                        int(ttft_ms) if ttft_ms is not None else None,
+                        json.dumps(stage_durations or {}, sort_keys=True),
+                        int(prompt_tokens) if prompt_tokens is not None else None,
+                        (
+                            int(completion_tokens)
+                            if completion_tokens is not None
+                            else None
+                        ),
+                        (
+                            float(estimated_cost_usd)
+                            if estimated_cost_usd is not None
+                            else None
+                        ),
                         row["id"],
                     ),
                 )

@@ -170,6 +170,10 @@ APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
 APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()
 AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
+WEB_AUTH_MODE = os.getenv(
+    "WEB_AUTH_MODE",
+    "supabase" if APP_ENV in {"pilot", "production"} else "disabled",
+).lower()
 ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
@@ -187,9 +191,37 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 LOCAL_PILOT_DB_PATH = Path(os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"))
 LOCAL_FILE_ROOT = Path(os.getenv("LOCAL_FILE_ROOT", "data/pilot_files"))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_PUBLISHABLE_KEY = os.getenv(
+    "SUPABASE_PUBLISHABLE_KEY",
+    os.getenv("SUPABASE_ANON_KEY", ""),
+)
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "pilot-files")
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
+WEB_ALLOWED_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "WEB_ALLOWED_ORIGINS",
+        "http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+)
+DATABASE_POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "1"))
+DATABASE_POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
+AUTH_CACHE_SECONDS = int(os.getenv("AUTH_CACHE_SECONDS", "60"))
+REQUEST_ANALYZER_MODEL = os.getenv(
+    "REQUEST_ANALYZER_MODEL",
+    DEFAULT_FAST_MODEL,
+).strip()
+ANSWER_VERIFIER_MODEL = os.getenv(
+    "ANSWER_VERIFIER_MODEL",
+    DEFAULT_FAST_MODEL,
+).strip()
+EMBEDDING_MODEL = os.getenv(
+    "EMBEDDING_MODEL",
+    "google/gemini-embedding-001",
+).strip()
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 
 MAX_QUERIES_PER_SESSION = int(os.getenv("MAX_QUERIES_PER_SESSION", "25"))
 MAX_QUERIES_PER_DAY_GLOBAL = int(os.getenv("MAX_QUERIES_PER_DAY_GLOBAL", "300"))

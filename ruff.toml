@@ -2,3 +2,4 @@ target-version = "py312"
 
 [lint.per-file-ignores]
 "farmers_chatbot/streamlit_app.py" = ["SIM117"]
+"farmers_chatbot/web_api.py" = ["BLE001"]  # SSE stream handler must catch all exceptions to record turn status

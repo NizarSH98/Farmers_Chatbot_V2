@@ -1,5 +1,37 @@
 services:
   - type: web
+    name: raise-esdu-web-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn farmers_chatbot.web_api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: APP_ENV
+        value: pilot
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ENABLE_TRUSTED_WEB_SEARCH
+        value: "true"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: WEB_AUTH_MODE
+        value: supabase
+      - key: WEB_ALLOWED_ORIGINS
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: raise-private
+      - key: APP_PUBLIC_URL
+        sync: false
+
+  - type: web
     name: raise-esdu-whatsapp-pilot
     runtime: python
     plan: starter

@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!apps/web/.env.example
 .streamlit/secrets.toml
 
 # Python
@@ -44,6 +45,11 @@ knowledge_base/incoming/
 
 # Contractual source workbook is local evidence, not deployed runtime material.
 RAISE_Logframe_final.xlsx
+
+# Node / Next.js
+node_modules/
+.next/
+tsconfig.tsbuildinfo
 
 # Test/build output
 .pytest_cache/

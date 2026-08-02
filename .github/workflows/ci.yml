@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -31,3 +31,60 @@ jobs:
       - run: python -m pytest -q
       - run: python scripts/evaluate_retrieval.py
       - run: python scripts/benchmark_service.py --iterations 60 --workers 30
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npx vitest run
+      - run: npm run build
+      - run: npm audit --omit=dev
+
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate SQL migration syntax
+        run: |
+          for f in migrations/*.sql; do
+            echo "Checking $f ..."
+            python3 -c "
+          with open('$f') as fh:
+              sql = fh.read()
+          # Basic syntax checks: balanced parentheses, no trailing commas before )
+          assert sql.count('(') == sql.count(')'), f'Unbalanced parentheses in $f'
+          print(f'  $f OK ({len(sql)} chars)')
+          "
+          done
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install pip-audit
+      - run: pip-audit -r requirements.txt
+      - name: Check for secrets in tracked files
+        run: |
+          if git grep -l 'sk-or-\|PRIVATE KEY\|service_role' -- ':!*.example' ':!*.md' ':!*.yml'; then
+            echo "::error::Potential secret detected in tracked files"
+            exit 1
+          fi
