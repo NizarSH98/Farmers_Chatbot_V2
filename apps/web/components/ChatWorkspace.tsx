@@ -161,7 +161,9 @@ export function ChatWorkspace() {
       setConfig(appConfig);
       setProfile(user);
       setMode(user.default_mode || "standard");
-      setModelId(appConfig.models[0]?.id || "");
+      const savedModel = localStorage.getItem("raise-model");
+      const validModel = appConfig.models.find((item) => item.id === savedModel);
+      setModelId(validModel ? savedModel! : appConfig.models[0]?.id || "");
       if (!user.consent_current) {
         const legal = await apiFetch<{ markdown: string }>(
           "/v1/legal/agreement?language=" + language,
@@ -939,7 +941,7 @@ export function ChatWorkspace() {
             </div>
             <div className="settings-section">
               <label htmlFor="model-select">{text("model")}</label>
-              <select id="model-select" onChange={(event) => setModelId(event.target.value)} value={modelId}>
+              <select id="model-select" onChange={(event) => { setModelId(event.target.value); localStorage.setItem("raise-model", event.target.value); }} value={modelId}>
                 {config.models.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
