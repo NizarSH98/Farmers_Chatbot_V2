@@ -41,10 +41,10 @@ class RequestAnalysis:
     missing_fields: tuple[str, ...]
     needs_clarification: bool
     clarification_question: str | None
-    clarification_options: tuple[str, ...] = ()
     retrieval_queries: tuple[str, ...]
     evidence_requirements: tuple[str, ...]
     output_shape: str
+    clarification_options: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
