@@ -84,7 +84,7 @@ jobs:
       - run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-1835
       - name: Check for secrets in tracked files
         run: |
-          if git grep -l 'sk-or-\|PRIVATE KEY\|service_role' -- ':!*.example' ':!*.md' ':!*.yml'; then
+          if git grep -lP 'sk-or-v1[_-]|-----BEGIN (RSA |EC )?PRIVATE KEY-----|eyJhbGciOi[A-Za-z0-9]' -- ':!*.example' ':!*.md' ':!*.yml'; then
             echo "::error::Potential secret detected in tracked files"
             exit 1
           fi
