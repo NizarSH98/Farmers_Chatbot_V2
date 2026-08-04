@@ -575,10 +575,14 @@ class AsyncAssistantPipeline:
                         "Verify this draft without revealing chain-of-thought. Check "
                         "citation support, units, dates, geography, uncertainty, "
                         "unsafe pesticide, veterinary, and food-safety instructions, "
-                        "and unsupported certainty. Return JSON only: approved, "
-                        "revised_answer, warning. Preserve the user's language. If "
-                        "evidence is insufficient for a high-risk claim, replace it "
-                        "with a limitation and qualified-expert referral."
+                        "and unsupported certainty. Square-bracket citation IDs like "
+                        "[RAISE-K001] or [AKKAR-PROFILE-001] are intentional inline "
+                        "references to the knowledge base and must NOT be flagged as "
+                        "raw citation tags or incomplete formatting. Return JSON "
+                        "only: approved, revised_answer, warning. Preserve the "
+                        "user's language. If evidence is insufficient for a "
+                        "high-risk claim, replace it with a limitation and "
+                        "qualified-expert referral."
                     ),
                 },
                 {
