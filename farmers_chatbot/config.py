@@ -43,10 +43,10 @@ class ModelOption:
 
 
 MODEL_CATALOG: dict[str, ModelOption] = {
-    "google/gemini-3.6-flash": ModelOption(
-        id="google/gemini-3.6-flash",
-        label="Gemini 3.6 Flash",
-        description="Fast multimodal model for routine text and visual questions.",
+    "moonshotai/kimi-k3": ModelOption(
+        id="moonshotai/kimi-k3",
+        label="Kimi K3",
+        description="Strong multimodal reasoning model; the default for accuracy.",
         supports_images=True,
     ),
     "xiaomi/mimo-v2.5": ModelOption(
@@ -61,17 +61,11 @@ MODEL_CATALOG: dict[str, ModelOption] = {
         description="Balanced multimodal model for analysis and artifacts.",
         supports_images=True,
     ),
-    "moonshotai/kimi-k3": ModelOption(
-        id="moonshotai/kimi-k3",
-        label="Kimi K3",
-        description="Deep multimodal reasoning; slower and more expensive.",
-        supports_images=True,
-    ),
 }
 
 
 DEFAULT_FAST_MODEL = os.getenv(
-    "OPENROUTER_FAST_MODEL", "google/gemini-3.6-flash"
+    "OPENROUTER_FAST_MODEL", "moonshotai/kimi-k3"
 )
 DEFAULT_DEEP_MODEL = os.getenv(
     "OPENROUTER_DEEP_MODEL", "moonshotai/kimi-k3"
@@ -109,7 +103,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Short answer for routine questions and slower connections.",
         model=DEFAULT_FAST_MODEL,
         top_k=4,
-        max_tokens=400,
+        max_tokens=700,
         temperature=0.2,
         reasoning_effort="low",
         allow_general_knowledge=True,
@@ -122,7 +116,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Default balance of local evidence, detail, latency, and cost.",
         model=DEFAULT_FAST_MODEL,
         top_k=6,
-        max_tokens=650,
+        max_tokens=1200,
         temperature=0.25,
         reasoning_effort="medium",
         allow_general_knowledge=True,
@@ -135,7 +129,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="More retrieval and reasoning for planning or comparison.",
         model=DEFAULT_DEEP_MODEL,
         top_k=9,
-        max_tokens=1000,
+        max_tokens=2000,
         temperature=0.2,
         reasoning_effort="high",
         allow_general_knowledge=True,
@@ -148,7 +142,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Auditable answer restricted to the reviewed knowledge base.",
         model=DEFAULT_FAST_MODEL,
         top_k=10,
-        max_tokens=650,
+        max_tokens=1000,
         temperature=0.0,
         reasoning_effort="low",
         allow_general_knowledge=False,
@@ -234,6 +228,7 @@ MAX_DEEP_QUERIES_PER_USER_DAY = int(
     os.getenv("MAX_DEEP_QUERIES_PER_USER_DAY", "10")
 )
 MAX_ARTIFACTS_PER_USER_DAY = int(os.getenv("MAX_ARTIFACTS_PER_USER_DAY", "10"))
+MAX_USER_WEEKLY_COST_USD = float(os.getenv("MAX_USER_WEEKLY_COST_USD", "7.0"))
 PILOT_COOLDOWN_SECONDS = float(os.getenv("PILOT_COOLDOWN_SECONDS", "2"))
 MAX_PROJECT_FILES = int(os.getenv("MAX_PROJECT_FILES", "5"))
 MAX_PROJECT_FILE_BYTES = int(os.getenv("MAX_PROJECT_FILE_BYTES", str(10 * 1024 * 1024)))

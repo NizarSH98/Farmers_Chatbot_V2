@@ -400,20 +400,34 @@ export function ChatWorkspace() {
   };
 
   const sendFeedback = async (message: Message, helpful: boolean) => {
-    if (!token || message.pending) return;
+    if (!token || message.pending || message.feedbackPending) return;
+    const category = helpful ? "helpful" : "not_helpful";
+    if (message.feedback === category) return;
+    const previousFeedback = message.feedback;
+    setMessages((items) => items.map((item) =>
+      item.id === message.id ? { ...item, feedback: category, feedbackPending: true } : item
+    ));
     try {
       await apiFetch("/v1/feedback", token, {
         method: "POST",
         body: JSON.stringify({
-          category: helpful ? "helpful" : "not_helpful",
+          category,
           comment: helpful ? "Helpful answer" : "Answer needs improvement",
           rating: helpful ? 5 : 2,
           message_id: message.id,
           language
         })
       });
+      setMessages((items) => items.map((item) =>
+        item.id === message.id ? { ...item, feedbackPending: false } : item
+      ));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : text("error"));
+      setMessages((items) => items.map((item) =>
+        item.id === message.id
+          ? { ...item, feedback: previousFeedback, feedbackPending: false }
+          : item
+      ));
     }
   };
 
@@ -766,10 +780,24 @@ export function ChatWorkspace() {
                         <button onClick={() => regenerate(index)} type="button">
                           <RefreshCw /><span>{text("regenerate")}</span>
                         </button>
-                        <button aria-label={text("helpful")} onClick={() => void sendFeedback(message, true)} type="button">
+                        <button
+                          aria-label={text("helpful")}
+                          aria-pressed={message.feedback === "helpful"}
+                          className={message.feedback === "helpful" ? "feedback-active" : undefined}
+                          disabled={message.feedbackPending}
+                          onClick={() => void sendFeedback(message, true)}
+                          type="button"
+                        >
                           <ThumbsUp />
                         </button>
-                        <button aria-label={text("notHelpful")} onClick={() => void sendFeedback(message, false)} type="button">
+                        <button
+                          aria-label={text("notHelpful")}
+                          aria-pressed={message.feedback === "not_helpful"}
+                          className={message.feedback === "not_helpful" ? "feedback-active" : undefined}
+                          disabled={message.feedbackPending}
+                          onClick={() => void sendFeedback(message, false)}
+                          type="button"
+                        >
                           <ThumbsDown />
                         </button>
                       </div>

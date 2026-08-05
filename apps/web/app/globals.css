@@ -812,6 +812,19 @@ svg {
   color: var(--forest-800);
 }
 
+.message-actions button:disabled {
+  opacity: 0.6;
+}
+
+.message-actions button.feedback-active {
+  background: var(--sand-100);
+  color: var(--forest-800);
+}
+
+.message-actions button.feedback-active svg {
+  fill: currentColor;
+}
+
 .message-actions svg {
   height: 16px;
   width: 16px;

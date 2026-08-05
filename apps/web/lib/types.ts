@@ -65,6 +65,8 @@ export interface Message {
   }>;
   created_at: string;
   pending?: boolean;
+  feedback?: "helpful" | "not_helpful";
+  feedbackPending?: boolean;
 }
 
 export interface StreamEvent {

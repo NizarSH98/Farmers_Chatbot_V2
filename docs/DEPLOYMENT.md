@@ -37,9 +37,9 @@ Last updated: 2026-08-01
    OPENROUTER_API_KEY = "deployment-only-key"
    APP_ENV = "pilot"
    APP_PUBLIC_URL = "https://your-app.streamlit.app"
-   OPENROUTER_DEFAULT_MODEL = "google/gemini-3.6-flash"
-   OPENROUTER_ALLOWED_MODELS = "google/gemini-3.6-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,moonshotai/kimi-k3"
-   OPENROUTER_FAST_MODEL = "google/gemini-3.6-flash"
+   OPENROUTER_DEFAULT_MODEL = "moonshotai/kimi-k3"
+   OPENROUTER_ALLOWED_MODELS = "moonshotai/kimi-k3,xiaomi/mimo-v2.5,minimax/minimax-m3"
+   OPENROUTER_FAST_MODEL = "moonshotai/kimi-k3"
    OPENROUTER_DEEP_MODEL = "moonshotai/kimi-k3"
    OPENROUTER_ENFORCE_ZDR = true
    OPENROUTER_DATA_COLLECTION = "deny"
