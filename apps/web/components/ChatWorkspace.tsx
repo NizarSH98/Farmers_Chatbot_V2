@@ -371,11 +371,18 @@ export function ChatWorkspace() {
         } else if (event.event === "warning") {
           patchPending(assistantId, { warning: String(event.data.message || "") });
         } else if (event.event === "turn.completed") {
+          const quickReplies = Array.isArray(event.data.quick_replies)
+            ? event.data.quick_replies.map(String)
+            : [];
           patchPending(assistantId, {
             id: String(event.data.message_id || assistantId),
             status: String(event.data.kind || "complete"),
             model: String(event.data.model || modelId),
-            pending: false
+            pending: false,
+            ...(typeof event.data.content === "string"
+              ? { content: event.data.content }
+              : {}),
+            ...(quickReplies.length > 0 ? { quickReplies } : {})
           });
         } else if (event.event === "error") {
           throw new Error(String(event.data.message || text("error")));

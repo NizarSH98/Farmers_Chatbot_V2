@@ -25,7 +25,7 @@ from .config import (
 from .documents import ProjectSearchResult, search_project_chunks
 from .knowledge import KnowledgeIndex, SearchResult
 from .language import detect_language
-from .llm import AssistantRequest, AssistantService
+from .llm import AssistantRequest, AssistantService, extract_follow_up_questions
 from .tools import ToolRegistry
 from .trusted_sources import requires_live_verification
 
@@ -66,6 +66,44 @@ class RequestAnalysis:
         }
 
 
+REQUEST_ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "intent": {"type": "string"},
+        "decision": {"type": "string"},
+        "domain": {"type": "string"},
+        "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+        "currentness": {"type": "string", "enum": ["stable", "current"]},
+        "location": {"type": ["string", "null"]},
+        "missing_fields": {"type": "array", "items": {"type": "string"}},
+        "needs_clarification": {"type": "boolean"},
+        "clarification_question": {"type": ["string", "null"]},
+        "clarification_options": {"type": "array", "items": {"type": "string"}},
+        "retrieval_queries": {"type": "array", "items": {"type": "string"}},
+        "evidence_requirements": {"type": "array", "items": {"type": "string"}},
+        "output_shape": {"type": "string"},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "intent",
+        "decision",
+        "domain",
+        "risk",
+        "currentness",
+        "location",
+        "missing_fields",
+        "needs_clarification",
+        "clarification_question",
+        "clarification_options",
+        "retrieval_queries",
+        "evidence_requirements",
+        "output_shape",
+        "assumptions",
+    ],
+    "additionalProperties": False,
+}
+
+
 @dataclass
 class PreparedTurn:
     analysis: RequestAnalysis
@@ -98,6 +136,7 @@ class PipelineResult:
     estimated_cost_usd: float | None = None
     success: bool = True
     error_type: str | None = None
+    follow_up_questions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -349,6 +388,7 @@ class AsyncAssistantPipeline:
                 prepared, started, "empty_response", "The model returned no answer."
             )
             return
+        answer, follow_up_questions = extract_follow_up_questions(answer)
 
         warning = prepared.warning
         if buffer_answer:
@@ -398,6 +438,7 @@ class AsyncAssistantPipeline:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             estimated_cost_usd=self._float_or_none(usage.get("cost")),
+            follow_up_questions=follow_up_questions,
         )
         yield PipelineEvent(
             "usage",
@@ -414,6 +455,8 @@ class AsyncAssistantPipeline:
                 "model": profile.model,
                 "duration_ms": result.duration_ms,
                 "ttft_ms": ttft_ms,
+                "content": answer,
+                "quick_replies": follow_up_questions,
             },
             result=result,
         )
@@ -483,7 +526,14 @@ class AsyncAssistantPipeline:
             ],
             "temperature": 0,
             "max_tokens": 450,
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "request_analysis",
+                    "strict": True,
+                    "schema": REQUEST_ANALYSIS_JSON_SCHEMA,
+                },
+            },
             "reasoning": {"effort": "low", "exclude": True},
             "provider": self._provider_policy(),
         }
