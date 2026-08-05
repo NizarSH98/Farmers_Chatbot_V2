@@ -27,6 +27,13 @@ export interface CurrentUser {
   default_mode: string;
 }
 
+export interface UsageSummary {
+  weekly_spend_usd: number;
+  weekly_limit_usd: number;
+  week_start: string;
+  week_end: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;

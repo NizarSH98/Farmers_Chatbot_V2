@@ -1140,6 +1140,27 @@ svg {
   margin: 0;
 }
 
+.usage-section p {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.usage-bar {
+  background: var(--sand-100);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.usage-bar-fill {
+  background: var(--forest-800);
+  border-radius: 999px;
+  height: 100%;
+  transition: width 0.2s ease;
+}
+
 .segmented-control {
   background: var(--sand-100);
   border-radius: 11px;

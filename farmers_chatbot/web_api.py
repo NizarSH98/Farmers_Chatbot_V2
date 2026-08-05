@@ -270,6 +270,21 @@ async def me(
     }
 
 
+@app.get("/v1/usage")
+async def usage(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    services = _services(request)
+    weekly = await asyncio.to_thread(services.store.get_weekly_usage, user.id)
+    return {
+        "weekly_spend_usd": weekly.spend_usd,
+        "weekly_limit_usd": weekly.limit_usd,
+        "week_start": weekly.week_start,
+        "week_end": weekly.week_end,
+    }
+
+
 @app.get("/v1/legal/agreement")
 async def agreement(
     language: str = Query(default="ar", pattern="^(ar|en)$"),

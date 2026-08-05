@@ -101,6 +101,20 @@ async def test_me_with_auth(client: httpx.AsyncClient) -> None:
     assert data["email"] == "local@example.test"
 
 
+async def test_usage_endpoint_returns_weekly_spend_and_limit(
+    client: httpx.AsyncClient,
+) -> None:
+    from farmers_chatbot.config import MAX_USER_WEEKLY_COST_USD
+
+    response = await client.get("/v1/usage", headers=AUTH)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["weekly_spend_usd"] == 0.0
+    assert data["weekly_limit_usd"] == MAX_USER_WEEKLY_COST_USD
+    assert "week_start" in data
+    assert "week_end" in data
+
+
 async def test_consent_flow(client: httpx.AsyncClient) -> None:
     response = await client.get("/v1/conversations", headers=AUTH)
     assert response.status_code == 428

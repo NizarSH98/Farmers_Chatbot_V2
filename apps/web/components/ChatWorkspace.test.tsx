@@ -68,6 +68,14 @@ function stubBackend(feedbackStatus = 201) {
       if (url.includes("/v1/conversations/c1/messages")) {
         return jsonResponse({ items: [assistantMessage] });
       }
+      if (url.endsWith("/v1/usage")) {
+        return jsonResponse({
+          weekly_spend_usd: 1.5,
+          weekly_limit_usd: 7,
+          week_start: "",
+          week_end: ""
+        });
+      }
       if (url.endsWith("/v1/feedback")) {
         return feedbackStatus >= 400
           ? jsonResponse({ detail: "boom" }, feedbackStatus)
@@ -114,5 +122,22 @@ describe("ChatWorkspace feedback buttons", () => {
     fireEvent.click(helpful);
     await screen.findByRole("alert");
     expect(helpful).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("ChatWorkspace weekly usage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("shows the fetched weekly spend and limit in settings", async () => {
+    stubBackend();
+    render(<ChatWorkspace />);
+
+    await screen.findByText("Answer text");
+    fireEvent.click(screen.getByRole("button", { name: "الإعدادات" }));
+
+    expect(await screen.findByText("$1.50 / $7.00")).toBeInTheDocument();
   });
 });

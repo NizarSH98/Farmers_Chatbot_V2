@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from .config import (
     MAX_DEEP_QUERIES_PER_USER_DAY,
     MAX_PILOT_QUERIES_PER_DAY,
     MAX_QUERIES_PER_USER_DAY,
+    MAX_USER_WEEKLY_COST_USD,
     PILOT_COOLDOWN_SECONDS,
 )
 
@@ -33,11 +34,28 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _week_bounds(now: datetime) -> tuple[str, str]:
+    """Return the [start, end) ISO timestamps of the Monday-start UTC week."""
+
+    monday = now.date() - timedelta(days=now.weekday())
+    start = datetime(monday.year, monday.month, monday.day, tzinfo=UTC)
+    end = start + timedelta(days=7)
+    return start.isoformat(), end.isoformat()
+
+
 @dataclass(frozen=True)
 class PilotRateLimit:
     allowed: bool
     message: str | None
     remaining_user: int
+
+
+@dataclass(frozen=True)
+class WeeklyUsage:
+    spend_usd: float
+    limit_usd: float
+    week_start: str
+    week_end: str
 
 
 class PilotStore:
@@ -1485,6 +1503,7 @@ class PilotStore:
     def check_rate_limit(self, user_id: str, mode: str = "standard") -> PilotRateLimit:
         now = datetime.now(UTC)
         day = now.date().isoformat()
+        week_start, week_end = _week_bounds(now)
         with self._connect() as connection:
             user_count = int(
                 connection.execute(
@@ -1516,6 +1535,18 @@ class PilotStore:
                     (user_id, day),
                 ).fetchone()["count"]
             )
+            weekly_spend = float(
+                connection.execute(
+                    self._sql(
+                        """
+                        SELECT COALESCE(SUM(estimated_cost_usd), 0) AS spend
+                        FROM query_events
+                        WHERE user_id = ? AND occurred_at >= ? AND occurred_at < ?
+                        """
+                    ),
+                    (user_id, week_start, week_end),
+                ).fetchone()["spend"]
+            )
             last = connection.execute(
                 self._sql(
                     """
@@ -1534,6 +1565,10 @@ class PilotStore:
             if mode == "deep" and deep_count >= MAX_DEEP_QUERIES_PER_USER_DAY:
                 return PilotRateLimit(
                     False, "Daily Deep-mode limit reached.", remaining
+                )
+            if weekly_spend >= MAX_USER_WEEKLY_COST_USD:
+                return PilotRateLimit(
+                    False, "Weekly spending limit reached.", remaining
                 )
             if last:
                 elapsed = (
@@ -1557,6 +1592,29 @@ class PilotStore:
                 (now.isoformat(), day, user_id, mode),
             )
         return PilotRateLimit(True, None, max(0, remaining - 1))
+
+    def get_weekly_usage(self, user_id: str) -> WeeklyUsage:
+        now = datetime.now(UTC)
+        week_start, week_end = _week_bounds(now)
+        with self._connect() as connection:
+            spend = float(
+                connection.execute(
+                    self._sql(
+                        """
+                        SELECT COALESCE(SUM(estimated_cost_usd), 0) AS spend
+                        FROM query_events
+                        WHERE user_id = ? AND occurred_at >= ? AND occurred_at < ?
+                        """
+                    ),
+                    (user_id, week_start, week_end),
+                ).fetchone()["spend"]
+            )
+        return WeeklyUsage(
+            spend_usd=round(spend, 4),
+            limit_usd=MAX_USER_WEEKLY_COST_USD,
+            week_start=week_start,
+            week_end=week_end,
+        )
 
     def complete_query(
         self,

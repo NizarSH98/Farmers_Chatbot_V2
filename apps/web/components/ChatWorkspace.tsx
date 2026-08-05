@@ -41,7 +41,8 @@ import type {
   CurrentUser,
   Language,
   Message,
-  TurnPayload
+  TurnPayload,
+  UsageSummary
 } from "@/lib/types";
 
 type DialogState =
@@ -87,6 +88,7 @@ export function ChatWorkspace() {
   const [imagePreview, setImagePreview] = useState("");
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState("");
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -149,6 +151,15 @@ export function ChatWorkspace() {
     return result.items;
   }, []);
 
+  const loadUsage = useCallback(async (accessToken: string) => {
+    try {
+      const result = await apiFetch<UsageSummary>("/v1/usage", accessToken);
+      setUsage(result);
+    } catch {
+      // Usage display is informational; a failed refresh should not block chat.
+    }
+  }, []);
+
   const bootstrap = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -174,13 +185,14 @@ export function ChatWorkspace() {
       } else {
         const items = await loadConversations(token);
         if (items[0]) setActiveId((value) => value || items[0].id);
+        void loadUsage(token);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : text("error"));
     } finally {
       setLoading(false);
     }
-  }, [language, loadConversations, text, token]);
+  }, [language, loadConversations, loadUsage, text, token]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void bootstrap(), 0);
@@ -225,6 +237,7 @@ export function ChatWorkspace() {
       setProfile((value) => value ? { ...value, consent_current: true } : value);
       const items = await loadConversations(token);
       if (items[0]) setActiveId(items[0].id);
+      void loadUsage(token);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : text("error"));
     }
@@ -387,7 +400,10 @@ export function ChatWorkspace() {
       abortRef.current = null;
       setSending(false);
       setStatusStage("");
-      if (token) void loadConversations(token);
+      if (token) {
+        void loadConversations(token);
+        void loadUsage(token);
+      }
     }
   };
 
@@ -988,6 +1004,24 @@ export function ChatWorkspace() {
                 <option value="direct">{text("direct")}</option>
               </select>
             </div>
+            {usage && (
+              <div className="settings-section usage-section">
+                <label>{text("weeklyUsage")}</label>
+                <div className="usage-bar" role="progressbar" aria-valuemin={0} aria-valuemax={usage.weekly_limit_usd} aria-valuenow={Math.min(usage.weekly_spend_usd, usage.weekly_limit_usd)}>
+                  <div
+                    className="usage-bar-fill"
+                    style={{
+                      width: Math.min(
+                        100,
+                        (usage.weekly_spend_usd / Math.max(usage.weekly_limit_usd, 0.01)) * 100
+                      ) + "%"
+                    }}
+                  />
+                </div>
+                <p>${usage.weekly_spend_usd.toFixed(2)} / ${usage.weekly_limit_usd.toFixed(2)}</p>
+                <small>{text("weeklyUsageHint")}</small>
+              </div>
+            )}
             <div className="settings-section account-section">
               <label>{text("account")}</label>
               <p>{profile?.email}</p>
