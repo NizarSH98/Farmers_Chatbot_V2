@@ -33,6 +33,7 @@ import remarkGfm from "remark-gfm";
 
 import { ApiError, apiFetch, streamTurn, uploadImage } from "@/lib/api";
 import { t } from "@/lib/i18n";
+import { mergePreservingClientState } from "@/lib/messages";
 import { supabaseBrowser } from "@/lib/supabase";
 import type {
   AppConfig,
@@ -205,7 +206,9 @@ export function ChatWorkspace() {
       "/v1/conversations/" + activeId + "/messages?limit=100",
       token
     )
-      .then((result) => setMessages(result.items))
+      .then((result) => {
+        setMessages((previous) => mergePreservingClientState(result.items, previous));
+      })
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : text("error"));
       });
