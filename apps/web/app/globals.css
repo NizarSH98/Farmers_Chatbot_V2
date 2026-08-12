@@ -314,6 +314,22 @@ svg {
   border-color: var(--forest-700);
 }
 
+.workspace-button {
+  align-items: center;
+  background: rgb(23 79 58 / 7%);
+  border: 1px solid rgb(23 79 58 / 12%);
+  border-radius: 12px;
+  color: var(--forest-800);
+  display: flex;
+  font-weight: 750;
+  gap: 10px;
+  margin-bottom: 12px;
+  min-height: 44px;
+  padding: 9px 13px;
+  text-align: start;
+  width: 100%;
+}
+
 .rail-new {
   background: var(--surface);
   margin-top: 18px;
@@ -1092,6 +1108,215 @@ svg {
   max-width: 760px;
 }
 
+.corpus-warning {
+  align-items: center;
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--warning-border);
+  color: var(--ink);
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 9px 18px;
+}
+
+.corpus-warning button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  flex: 0 0 auto;
+  padding: 3px;
+  place-items: center;
+}
+
+.corpus-warning svg {
+  height: 17px;
+  width: 17px;
+}
+
+.workspace-modal {
+  max-width: 1060px;
+  overflow: hidden;
+}
+
+.workspace-modal .eyebrow {
+  color: var(--forest-700);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .12em;
+  margin: 0 0 3px;
+}
+
+.workspace-grid {
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  display: grid;
+  grid-template-columns: minmax(230px, .7fr) minmax(0, 1.7fr);
+  min-height: 480px;
+  overflow: hidden;
+}
+
+.project-panel {
+  background: var(--sand-50);
+  border-inline-end: 1px solid var(--line);
+  padding: 17px;
+}
+
+.project-panel h3,
+.workspace-detail h3,
+.workspace-section h4 {
+  margin: 0;
+}
+
+.project-create {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.project-create input,
+.project-create textarea {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  padding: 9px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.project-list {
+  display: grid;
+  gap: 6px;
+  max-height: 255px;
+  overflow-y: auto;
+}
+
+.project-list > button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  gap: 9px;
+  padding: 9px;
+  text-align: start;
+  width: 100%;
+}
+
+.project-list > button.selected {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: 0 4px 16px rgb(13 43 33 / 6%);
+}
+
+.project-list span,
+.workspace-file-list span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-list small,
+.workspace-file-list small,
+.workspace-detail-header p,
+.workspace-footer span {
+  color: var(--ink-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-detail {
+  max-height: 570px;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.workspace-detail-header,
+.workspace-section-title,
+.workspace-footer,
+.workspace-inline-actions {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  justify-content: space-between;
+}
+
+.workspace-detail-header p {
+  margin: 5px 0 0;
+  max-width: 530px;
+}
+
+.workspace-section {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 18px;
+}
+
+.workspace-section h4 {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.workspace-file-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.workspace-file-list > div {
+  align-items: center;
+  background: var(--sand-50);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding: 10px;
+}
+
+.workspace-empty {
+  align-items: center;
+  color: var(--ink-500);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.workspace-empty > svg {
+  height: 42px;
+  width: 42px;
+}
+
+.workspace-footer {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+
+.artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.artifact-actions button {
+  align-items: center;
+  background: rgb(23 79 58 / 7%);
+  border: 1px solid rgb(23 79 58 / 12%);
+  border-radius: 9px;
+  color: var(--forest-800);
+  display: inline-flex;
+  gap: 6px;
+  padding: 7px 9px;
+}
+
 .agreement-copy {
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1219,6 +1444,26 @@ svg {
 }
 
 @media (max-width: 900px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+    max-height: 70dvh;
+    overflow-y: auto;
+  }
+
+  .project-panel {
+    border-bottom: 1px solid var(--line);
+    border-inline-end: 0;
+  }
+
+  .project-list {
+    max-height: 170px;
+  }
+
+  .workspace-detail {
+    max-height: none;
+    overflow: visible;
+  }
+
   .suggestion-grid {
     grid-template-columns: 1fr;
     max-width: 620px;

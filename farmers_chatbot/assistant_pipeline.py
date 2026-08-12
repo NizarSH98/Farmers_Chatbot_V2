@@ -8,26 +8,30 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx
 
+from .assistant_contracts import TurnCommand, TurnEvent, TurnResult
 from .config import (
     ANSWER_VERIFIER_MODEL,
     MODE_PROFILES,
-    OPENROUTER_API_URL,
     OPENROUTER_DATA_COLLECTION,
     OPENROUTER_ENFORCE_ZDR,
     REQUEST_ANALYZER_MODEL,
+    ModeProfile,
     resolve_model_id,
 )
-from .documents import ProjectSearchResult, search_project_chunks
+from .documents import ProjectSearchResult
 from .knowledge import KnowledgeIndex, SearchResult
 from .language import detect_language
-from .llm import AssistantRequest, AssistantService, extract_follow_up_questions
+from .llm import AssistantPromptBuilder, AssistantRequest, extract_follow_up_questions
+from .provider import ProviderClient
+from .retrieval import LegacyHybridRetrieval, RetrievalRequest, RetrievalService
+from .tool_executor import ToolExecutor
 from .tools import ToolRegistry
-from .trusted_sources import requires_live_verification
+from .trusted_sources import requires_live_verification, url_is_trusted
 
 
 @dataclass(frozen=True)
@@ -115,100 +119,100 @@ class PreparedTurn:
     warning: str | None
     tools_used: list[str]
     stage_durations: dict[str, int]
+    retrieval_metrics: dict[str, Any]
+    graph_paths: list[dict[str, Any]]
+    provider_record_start: int = 0
 
 
 @dataclass
-class PipelineResult:
-    content: str
-    kind: str
-    language: str
-    model: str | None
-    citations: list[dict[str, Any]]
-    assumptions: list[str]
-    warnings: list[str]
-    tools_used: list[str]
-    artifact_ids: list[str]
-    duration_ms: int
-    ttft_ms: int | None
-    stage_durations: dict[str, int]
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    estimated_cost_usd: float | None = None
-    success: bool = True
-    error_type: str | None = None
-    follow_up_questions: list[str] = field(default_factory=list)
+class PipelineResult(TurnResult):
+    """Backward-compatible name for the canonical terminal result."""
 
 
 @dataclass
-class PipelineEvent:
-    event: str
-    data: dict[str, Any] = field(default_factory=dict)
-    result: PipelineResult | None = None
+class PipelineEvent(TurnEvent):
+    """Backward-compatible name for the canonical typed turn event."""
 
-
-class AsyncAssistantPipeline:
+class AssistantEngine:
     def __init__(
         self,
         knowledge: KnowledgeIndex,
         *,
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
+        provider: ProviderClient | None = None,
+        retrieval: RetrievalService | None = None,
     ) -> None:
         self.knowledge = knowledge
-        self.api_key = api_key if api_key is not None else os.getenv(
-            "OPENROUTER_API_KEY"
+        resolved_key = api_key if api_key is not None else os.getenv(
+            "OPENROUTER_API_KEY", ""
         )
-        self._client = client or httpx.AsyncClient(
-            timeout=httpx.Timeout(45.0, connect=8.0),
-            limits=httpx.Limits(max_connections=60, max_keepalive_connections=20),
-            http2=True,
+        self.provider = provider or ProviderClient(
+            api_key=resolved_key,
+            client=client,
         )
-        self._owns_client = client is None
+        self.api_key = self.provider.api_key
+        self.retrieval = retrieval or LegacyHybridRetrieval(knowledge)
 
     async def close(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        await self.provider.close()
 
     async def prepare(
         self,
-        request: AssistantRequest,
+        request: AssistantRequest | TurnCommand,
         *,
         tools: ToolRegistry,
         history: list[dict[str, str]],
         clarification_count: int,
     ) -> PreparedTurn:
         language = detect_language(request.text)
-        started = time.perf_counter()
-        analysis_task = asyncio.create_task(
-            self._analyze(
-                request,
-                language=language,
-                history=history,
-                clarification_count=clarification_count,
-            )
+        provider_record_start = len(self.provider.records)
+        analysis_started = time.perf_counter()
+        analysis = await self._analyze(
+            request,
+            language=language,
+            history=history,
+            clarification_count=clarification_count,
         )
         profile = MODE_PROFILES.get(request.mode, MODE_PROFILES["standard"])
-        local_task = asyncio.to_thread(
-            self.knowledge.search,
-            request.text,
-            language=language,
-            top_k=profile.top_k,
-        )
-        project_task = asyncio.to_thread(
-            search_project_chunks,
-            tools.project_chunks,
-            request.text,
-            top_k=5,
-        )
-        analysis, sources, project_sources = await asyncio.gather(
-            analysis_task, local_task, project_task
-        )
         timings = {
-            "analysis_and_retrieval": int((time.perf_counter() - started) * 1000)
+            "analysis": int((time.perf_counter() - analysis_started) * 1000)
         }
-        builder = AssistantService(self.knowledge, tools, api_key=self.api_key)
-        citations = builder._internal_citations(sources)
-        citations.extend(builder._project_citations(project_sources))
+        retrieval_started = time.perf_counter()
+        bundle = await self.retrieval.retrieve(
+            RetrievalRequest(
+                query=request.text,
+                queries=analysis.retrieval_queries,
+                language=language,
+                mode=request.mode,
+                actor_id=(
+                    request.actor_id
+                    if isinstance(request, TurnCommand)
+                    else request.user_id
+                ),
+                project_id=request.project_id,
+                geography=analysis.location,
+                domain=analysis.domain,
+                risk=analysis.risk,
+                currentness=analysis.currentness,
+                top_k=profile.top_k,
+                graph_hops=2 if request.mode == "deep" else 1,
+            ),
+            project_chunks=tools.project_chunks,
+        )
+        sources = bundle.knowledge_results
+        project_sources = bundle.project_results
+        timings["retrieval"] = int(
+            (time.perf_counter() - retrieval_started) * 1000
+        )
+        builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
+        if bundle.retrieval_metrics.get("backend") == "postgres_hybrid_graph":
+            citations = [
+                item.citation() for item in [*bundle.passages, *bundle.claims]
+            ]
+        else:
+            citations = builder._internal_citations(sources)
+            citations.extend(builder._project_citations(project_sources))
         used = ["search_project_knowledge"] if project_sources else []
         warning = None
         trusted_context = ""
@@ -244,11 +248,14 @@ class AsyncAssistantPipeline:
             warning=warning,
             tools_used=used,
             stage_durations=timings,
+            retrieval_metrics=dict(bundle.retrieval_metrics),
+            graph_paths=[dict(path) for path in bundle.graph_paths],
+            provider_record_start=provider_record_start,
         )
 
     async def stream(
         self,
-        request: AssistantRequest,
+        request: AssistantRequest | TurnCommand,
         prepared: PreparedTurn,
         *,
         tools: ToolRegistry,
@@ -299,7 +306,7 @@ class AsyncAssistantPipeline:
             )
             return
 
-        builder = AssistantService(self.knowledge, tools, api_key=self.api_key)
+        builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
         messages = builder._build_messages(
             query=request.text,
             sources=prepared.sources,
@@ -316,59 +323,61 @@ class AsyncAssistantPipeline:
             project_instructions=request.project_instructions,
         )
         if not self.api_key:
-            fallback = builder._fallback_answer(
-                request.text,
-                prepared.sources,
-                prepared.project_sources,
-                prepared.language,
+            requires_verification = (
+                analysis.risk == "high" or analysis.currentness == "current"
+            )
+            fallback = (
+                self._safe_verification_fallback(prepared.language)
+                if requires_verification
+                else builder._fallback_answer(
+                    request.text,
+                    prepared.sources,
+                    prepared.project_sources,
+                    prepared.language,
+                )
             )
             yield PipelineEvent("content.delta", {"text": fallback})
             result = PipelineResult(
                 content=fallback,
-                kind="answer",
+                kind="refusal" if requires_verification else "answer",
                 language=prepared.language,
                 model=None,
                 citations=prepared.citations,
                 assumptions=list(analysis.assumptions),
-                warnings=[prepared.warning] if prepared.warning else [],
+                warnings=(
+                    [prepared.warning or self._verification_warning(prepared.language)]
+                    if requires_verification
+                    else [prepared.warning] if prepared.warning else []
+                ),
                 tools_used=prepared.tools_used,
                 artifact_ids=[],
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 ttft_ms=0,
                 stage_durations=dict(prepared.stage_durations),
             )
-            yield PipelineEvent("turn.completed", {"kind": "answer"}, result=result)
+            yield PipelineEvent(
+                "turn.completed", {"kind": result.kind}, result=result
+            )
             return
 
         yield PipelineEvent("status", {"stage": "generation"})
         generation_started = time.perf_counter()
-        buffer_answer = profile.key == "deep" or analysis.risk == "high"
-        answer_parts: list[str] = []
-        ttft_ms: int | None = None
-        usage: dict[str, Any] = {}
-        annotations: list[dict[str, Any]] = []
+        verification_required = (
+            profile.key == "deep"
+            or analysis.risk == "high"
+            or analysis.currentness == "current"
+        )
         try:
-            async for chunk in self._openrouter_stream(
-                model=profile.model,
+            (
+                answer,
+                usage,
+                annotations,
+                executed_tools,
+            ) = await self._generate_with_tools(
                 messages=messages,
-                temperature=profile.temperature,
-                max_tokens=profile.max_tokens,
-                reasoning_effort=profile.reasoning_effort,
-            ):
-                if chunk["type"] == "content":
-                    text = str(chunk["text"])
-                    if ttft_ms is None:
-                        ttft_ms = int((time.perf_counter() - started) * 1000)
-                    answer_parts.append(text)
-                    if not buffer_answer:
-                        yield PipelineEvent("content.delta", {"text": text})
-                elif chunk["type"] == "usage":
-                    usage = chunk["usage"]
-                elif chunk["type"] == "citation":
-                    citation = chunk["citation"]
-                    if citation not in annotations:
-                        annotations.append(citation)
-                        yield PipelineEvent("source", {"citation": citation})
+                profile=profile,
+                executor=self._tool_executor(request, tools, profile),
+            )
         except (httpx.HTTPError, ValueError, KeyError, json.JSONDecodeError) as exc:
             yield self._error_result(
                 prepared,
@@ -382,37 +391,42 @@ class AsyncAssistantPipeline:
         prepared.stage_durations["generation"] = int(
             (time.perf_counter() - generation_started) * 1000
         )
-        answer = "".join(answer_parts).strip()
         if not answer:
             yield self._error_result(
                 prepared, started, "empty_response", "The model returned no answer."
             )
             return
         answer, follow_up_questions = extract_follow_up_questions(answer)
+        for citation in annotations:
+            yield PipelineEvent("source", {"citation": citation})
 
         warning = prepared.warning
-        if buffer_answer:
+        if verification_required:
             yield PipelineEvent("status", {"stage": "verification"})
             verification_started = time.perf_counter()
-            answer, verifier_warning = await self._verify(
+            answer, verifier_warning, verifier_approved = await self._verify(
                 query=request.text,
                 answer=answer,
                 citations=[*prepared.citations, *annotations],
                 language=prepared.language,
                 risk=analysis.risk,
+                currentness=analysis.currentness,
             )
             prepared.stage_durations["verification"] = int(
                 (time.perf_counter() - verification_started) * 1000
             )
             warning = verifier_warning or warning
-            if ttft_ms is None:
-                ttft_ms = int((time.perf_counter() - started) * 1000)
-            for part in self._display_chunks(answer):
-                yield PipelineEvent("content.delta", {"text": part})
+        else:
+            verifier_approved = True
+
+        ttft_ms = int((time.perf_counter() - started) * 1000)
+        for part in self._display_chunks(answer):
+            yield PipelineEvent("content.delta", {"text": part})
 
         citations = self._dedupe_citations(
-            [*prepared.citations, *annotations]
+            [*prepared.citations, *annotations, *tools.recent_citations]
         )
+        tools_used = list(dict.fromkeys([*prepared.tools_used, *executed_tools]))
         warnings = [warning] if warning else []
         if warning:
             yield PipelineEvent("warning", {"message": warning})
@@ -424,13 +438,13 @@ class AsyncAssistantPipeline:
         )
         result = PipelineResult(
             content=answer,
-            kind="answer",
+            kind="answer" if verifier_approved else "refusal",
             language=prepared.language,
             model=profile.model,
             citations=citations,
             assumptions=list(analysis.assumptions),
             warnings=warnings,
-            tools_used=prepared.tools_used,
+            tools_used=tools_used,
             artifact_ids=list(tools.recent_artifact_ids),
             duration_ms=int((time.perf_counter() - started) * 1000),
             ttft_ms=ttft_ms,
@@ -439,6 +453,10 @@ class AsyncAssistantPipeline:
             completion_tokens=completion_tokens,
             estimated_cost_usd=self._float_or_none(usage.get("cost")),
             follow_up_questions=follow_up_questions,
+            provider_calls=[
+                record.to_dict()
+                for record in self.provider.records[prepared.provider_record_start :]
+            ],
         )
         yield PipelineEvent(
             "usage",
@@ -451,7 +469,7 @@ class AsyncAssistantPipeline:
         yield PipelineEvent(
             "turn.completed",
             {
-                "kind": "answer",
+                "kind": result.kind,
                 "model": profile.model,
                 "duration_ms": result.duration_ms,
                 "ttft_ms": ttft_ms,
@@ -461,9 +479,90 @@ class AsyncAssistantPipeline:
             result=result,
         )
 
+    async def _generate_with_tools(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        profile: ModeProfile,
+        executor: ToolExecutor,
+    ) -> tuple[str, dict[str, Any], list[dict[str, Any]], list[str]]:
+        """Run a bounded model/tool loop and return one final answer."""
+
+        working_messages = [dict(message) for message in messages]
+        annotations: list[dict[str, Any]] = []
+        tool_names: list[str] = []
+        prompt_tokens = 0
+        completion_tokens = 0
+        cost = 0.0
+        has_cost = False
+
+        for round_number in range(profile.max_tool_rounds + 1):
+            payload: dict[str, Any] = {
+                "model": profile.model,
+                "messages": working_messages,
+                "temperature": profile.temperature,
+                "max_tokens": profile.max_tokens,
+                "reasoning": {
+                    "effort": profile.reasoning_effort,
+                    "exclude": True,
+                },
+            }
+            if round_number < profile.max_tool_rounds:
+                definitions = executor.model_definitions()
+                if definitions:
+                    payload["tools"] = definitions
+                    payload["tool_choice"] = "auto"
+                    payload["parallel_tool_calls"] = True
+
+            response = await self.provider.complete(
+                stage=f"generation_round_{round_number + 1}",
+                payload=payload,
+                timeout=45.0,
+            )
+            if response.usage.prompt_tokens is not None:
+                prompt_tokens += response.usage.prompt_tokens
+            if response.usage.completion_tokens is not None:
+                completion_tokens += response.usage.completion_tokens
+            if response.usage.cost_usd is not None:
+                cost += response.usage.cost_usd
+                has_cost = True
+
+            message = response.message
+            for annotation in message.get("annotations") or []:
+                citation = self._annotation_citation(annotation)
+                if citation and citation not in annotations:
+                    annotations.append(citation)
+
+            calls = message.get("tool_calls") or []
+            if not calls:
+                content = message.get("content")
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("Model returned no final answer")
+                usage = {
+                    "prompt_tokens": prompt_tokens or None,
+                    "completion_tokens": completion_tokens or None,
+                    "cost": cost if has_cost else None,
+                }
+                return content.strip(), usage, annotations, tool_names
+
+            working_messages.append(dict(message))
+            executions = await executor.execute_many(list(calls))
+            for execution in executions:
+                tool_names.append(execution.name)
+                working_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": execution.call_id,
+                        "name": execution.name,
+                        "content": execution.content,
+                    }
+                )
+
+        raise ValueError("Tool loop ended without a final answer")
+
     async def _analyze(
         self,
-        request: AssistantRequest,
+        request: AssistantRequest | TurnCommand,
         *,
         language: str,
         history: list[dict[str, str]],
@@ -538,14 +637,12 @@ class AsyncAssistantPipeline:
             "provider": self._provider_policy(),
         }
         try:
-            response = await self._client.post(
-                OPENROUTER_API_URL,
-                headers=self._headers(),
-                json=payload,
+            response = await self.provider.complete(
+                stage="analyzer",
+                payload=payload,
                 timeout=15.0,
             )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            content = response.message["content"]
             return self._coerce_analysis(
                 json.loads(content),
                 fallback=fallback,
@@ -574,38 +671,13 @@ class AsyncAssistantPipeline:
             "reasoning": {"effort": reasoning_effort, "exclude": True},
             "provider": self._provider_policy(),
         }
-        async with self._client.stream(
-            "POST",
-            OPENROUTER_API_URL,
-            headers=self._headers(),
-            json=payload,
-        ) as response:
-            if response.status_code != 200:
-                body = (await response.aread())[:500]
-                raise ValueError(
-                    f"OpenRouter HTTP {response.status_code}: "
-                    f"{body.decode('utf-8', errors='replace')}"
-                )
-            async for line in response.aiter_lines():
-                if not line or line.startswith(":") or not line.startswith("data:"):
-                    continue
-                raw = line[5:].strip()
-                if raw == "[DONE]":
-                    break
-                data = json.loads(raw)
-                if data.get("usage"):
-                    yield {"type": "usage", "usage": data["usage"]}
-                choices = data.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta") or {}
-                content = delta.get("content")
-                if isinstance(content, str) and content:
-                    yield {"type": "content", "text": content}
-                for annotation in delta.get("annotations") or []:
-                    citation = self._annotation_citation(annotation)
-                    if citation:
-                        yield {"type": "citation", "citation": citation}
+        async for event in self.provider.stream(stage="generation", payload=payload):
+            if event["type"] == "annotation":
+                citation = self._annotation_citation(event["annotation"])
+                if citation:
+                    yield {"type": "citation", "citation": citation}
+                continue
+            yield event
 
     async def _verify(
         self,
@@ -615,7 +687,8 @@ class AsyncAssistantPipeline:
         citations: list[dict[str, Any]],
         language: str,
         risk: str,
-    ) -> tuple[str, str | None]:
+        currentness: str,
+    ) -> tuple[str, str | None, bool]:
         payload = {
             "model": ANSWER_VERIFIER_MODEL,
             "messages": [
@@ -643,6 +716,7 @@ class AsyncAssistantPipeline:
                             "draft": answer,
                             "language": language,
                             "risk": risk,
+                            "currentness": currentness,
                             "citations": citations,
                         },
                         ensure_ascii=False,
@@ -656,18 +730,31 @@ class AsyncAssistantPipeline:
             "provider": self._provider_policy(),
         }
         try:
-            response = await self._client.post(
-                OPENROUTER_API_URL,
-                headers=self._headers(),
-                json=payload,
+            response = await self.provider.complete(
+                stage="verifier",
+                payload=payload,
                 timeout=30.0,
             )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            content = response.message["content"]
             parsed = json.loads(content)
+            approved = parsed.get("approved") is True
             revised = str(parsed.get("revised_answer") or "").strip()
             warning = str(parsed.get("warning") or "").strip() or None
-            return (revised or answer), warning
+            if approved:
+                return (revised or answer), warning, True
+            if revised:
+                return (
+                    revised,
+                    warning
+                    or "The verifier revised unsupported or unsafe parts of the draft.",
+                    False,
+                )
+            return (
+                self._safe_verification_fallback(language),
+                warning
+                or "The draft did not pass verification and was replaced with a safe limitation.",
+                False,
+            )
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             warning = (
                 "تعذّر إكمال التحقق الإضافي؛ راجع هذا التوجيه مع خبير محلي مؤهل."
@@ -675,7 +762,48 @@ class AsyncAssistantPipeline:
                 else "Additional verification could not be completed; review this "
                 "guidance with a qualified local expert."
             )
-            return answer, warning
+            return self._safe_verification_fallback(language), warning, False
+
+    @staticmethod
+    def _tool_executor(
+        request: AssistantRequest | TurnCommand,
+        tools: ToolRegistry,
+        profile: ModeProfile,
+    ) -> ToolExecutor:
+        defaults = {"quick": 2, "standard": 6, "deep": 10, "source_only": 2}
+        if isinstance(request, TurnCommand):
+            capabilities = request.capabilities
+            maximum = capabilities.max_tool_calls
+            timeout = max(0.1, min(capabilities.tool_timeout_seconds, 30.0))
+        else:
+            capabilities = None
+            maximum = None
+            timeout = 12.0
+        return ToolExecutor(
+            tools,
+            capabilities=capabilities,
+            timeout_seconds=timeout,
+            max_parallel_calls=4,
+            max_total_calls=(
+                maximum
+                if maximum is not None
+                else defaults.get(profile.key, 6)
+            ),
+        )
+
+    @staticmethod
+    def _safe_verification_fallback(language: str) -> str:
+        if language == "arabic":
+            return (
+                "لا أستطيع تأكيد توصية آمنة ومحددة من الأدلة المتاحة الآن. "
+                "اجمع تفاصيل الحالة وتواصل مع خبير زراعي أو بيطري محلي مؤهل، "
+                "ولا تستخدم جرعة أو علاجاً غير موثق."
+            )
+        return (
+            "I cannot confirm a specific safe recommendation from the available "
+            "evidence. Record the observations and consult a qualified local "
+            "agronomist or veterinarian; do not apply an unverified dose or treatment."
+        )
 
     @staticmethod
     def _heuristic_analysis(
@@ -858,7 +986,7 @@ class AsyncAssistantPipeline:
             return None
         value = annotation.get("url_citation") or {}
         url = str(value.get("url") or "").strip()
-        if not url:
+        if not url or not url_is_trusted(url):
             return None
         return {
             "source_type": "model_url_annotation",
@@ -937,3 +1065,7 @@ class AsyncAssistantPipeline:
             {"code": error_type, "message": message, "detail": detail},
             result=result,
         )
+
+
+# One-release compatibility name. All orchestration lives in AssistantEngine.
+AsyncAssistantPipeline = AssistantEngine

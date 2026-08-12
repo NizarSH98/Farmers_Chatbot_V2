@@ -1,6 +1,11 @@
 # Target Architecture
 
-Last updated: 2026-07-29
+Last updated: 2026-08-11
+
+> Current authority: Next.js on Vercel plus one FastAPI service on Render and
+> Supabase-managed data. Streamlit is a frozen compatibility client, not a
+> deployment target. WhatsApp remains disabled until the canonical web soak
+> passes. See `docs/CANONICAL_PILOT_RUNBOOK.md`.
 
 ## Product boundary
 
@@ -12,12 +17,18 @@ The product is an Arabic-first, bilingual agricultural knowledge assistant for A
    - Versioned Markdown/JSON knowledge items instead of an opaque PDF-only corpus.
    - Stable source IDs and chunk metadata.
    - Separate static validated guidance from dynamic information.
+   - A versioned bilingual ontology with 162 typed entities, 352 aliases, and
+     183 passage-backed relations across all 21 planned entity types.
 2. **Retrieval layer**
    - Bilingual lexical retrieval as the reproducible baseline.
    - Benchmark-driven upgrade path to multilingual embeddings and hybrid ranking.
    - Deterministic source cards and confidence signals.
 3. **Assistant layer**
-   - OpenRouter-compatible chat client.
+   - One asynchronous `AssistantEngine` and one `ProviderClient` for every
+     channel.
+   - `TurnCoordinator` owns consent, idempotency, atomic quota/cost
+     reservation, persistence, exact finalization, and recovery.
+   - `ToolExecutor` owns schemas, risk/channel budgets, and timeouts.
    - Quick, Standard, Deep, and Source-only modes.
    - Reasoning effort is sent only to models whose capability registry allows it.
    - A bounded tool loop; tools never execute merely because model text resembles a command.
@@ -26,15 +37,20 @@ The product is an Arabic-first, bilingual agricultural knowledge assistant for A
    - Read a source record.
    - Read logframe status.
    - Record structured, consent-aware feedback.
-   - Future dynamic tools: LARI/MoA alerts, weather, market information, and referrals after source/API approval.
+   - Direct live-source connectors fetch only exact endpoints approved in the
+     versioned registry. Live connectors remain disabled until source/API
+     authorization and reliability review.
 5. **MCP layer**
    - The same safe tool implementations are exposed through an MCP server.
    - Local default transport is `stdio`; authenticated Streamable HTTP is a deployment option.
    - The MCP server does not expose arbitrary filesystem, shell, URL-fetch, or database-query tools.
 6. **Channel layer**
-   - Streamlit website first.
-   - Telegram/WhatsApp adapters call the same assistant service and governance rules.
-   - Channel credentials and webhook deployment are external configuration.
+   - Next.js is the canonical Arabic-first web interface.
+   - Streamlit is retained for one compatibility release through the unified
+     facade, then its hosted deployment is retired.
+   - WhatsApp is mounted but disabled; its router reuses the canonical service
+     container, coordinator, engine, provider, tools, and persisted turns. The
+     root module is only a one-release import wrapper.
 7. **Evidence layer**
    - Structured operational events, feedback status, benchmark reports, performance reports, and release records.
    - Personal data is kept outside the public repository.
@@ -80,14 +96,23 @@ Internal reasoning is never displayed as hidden chain-of-thought. The interface 
 
 ### Pilot cloud
 
-- Streamlit or containerized web service.
+- Next.js on Vercel and one FastAPI backend on Render.
+- Supabase PostgreSQL/pgvector, authentication, and private object storage.
 - Deployment-specific API key with spending cap and model allowlist.
 - Persistent feedback/evidence store.
 - Monitoring and controlled access.
 
+## Locked implementation decisions
+
+- Next.js is canonical; Streamlit retires after compatibility/parity.
+- WhatsApp remains disabled until the web soak; its thin FastAPI router is
+  already mounted in the canonical backend.
+- Supabase PostgreSQL hosts lexical, vector, graph, provenance, and tenant data;
+  no Neo4j service is added.
+- OpenRouter remains the model and embedding gateway.
+
 ## Decisions still requiring team approval
 
-- Telegram versus WhatsApp for the contractual pilot.
 - Approved model/provider data-retention policy.
 - Whether the strengthened guide is formally an ESDU publication or an ESDU-supported project knowledge base.
 - Expert owners for crops, livestock, water, food safety, business/value chains, and Arabic editorial review.

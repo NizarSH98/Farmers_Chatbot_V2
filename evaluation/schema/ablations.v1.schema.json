@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "raise.eval.ablations.v1",
+  "title": "RAISE ablation manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "definitions"],
+  "properties": {
+    "schema_version": {"const": "raise.eval.ablations.v1"},
+    "definitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "label", "lexical", "vector", "contextual_chunks", "graph_hops", "tools"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "lexical": {"type": "boolean"},
+          "vector": {"type": "boolean"},
+          "contextual_chunks": {"type": "boolean"},
+          "graph_hops": {"type": "integer", "minimum": 0, "maximum": 2},
+          "tools": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

@@ -40,8 +40,23 @@ data/artifacts/
 reports/generated/
 pilot_exports/
 
+# Hidden evaluation cases are supplied out-of-band and must never be committed.
+evaluation/hidden/
+# Local release-candidate backups and vector snapshots are portable evidence,
+# but can contain private pilot data and are never source-controlled.
+backups/
+snapshots/
+*.dump
+*.sql.gz
+*.snapshot
+
+
 # Raw source intake is reviewed locally before approved claims are promoted.
 knowledge_base/incoming/
+# The contractual DOCX is local source evidence. Generated, reviewed Markdown
+# releases are tracked; the original binary is retained outside Git.
+knowledge_base/ESDU_Agrifood_Knowledge_Base_v0.1.docx
+
 
 # Contractual source workbook is local evidence, not deployed runtime material.
 RAISE_Logframe_final.xlsx

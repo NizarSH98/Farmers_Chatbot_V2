@@ -56,7 +56,19 @@ const copy = {
     error: "حدث خطأ. حاول مرة أخرى بعد قليل.",
     imageReady: "الصورة جاهزة للإرسال",
     warning: "تنبيه",
-    disclaimer: "المساعد يدعم القرار ولا يستبدل الخبير المحلي في الحالات عالية الخطورة."
+    disclaimer: "المساعد يدعم القرار ولا يستبدل الخبير المحلي في الحالات عالية الخطورة.",
+    workspace: "المشاريع والملفات",
+    projects: "المشاريع",
+    projectName: "اسم المشروع",
+    projectInstructions: "تعليمات المشروع",
+    createProject: "إنشاء مشروع",
+    projectChat: "محادثة ضمن المشروع",
+    documents: "ملفات المشروع",
+    artifacts: "الملفات المنشأة",
+    uploadDocument: "رفع ملف",
+    download: "تنزيل",
+    exportData: "تصدير بياناتي",
+    noItems: "لا توجد عناصر بعد"
   },
   en: {
     appName: "RAISE",
@@ -113,7 +125,19 @@ const copy = {
     error: "Something went wrong. Please try again.",
     imageReady: "Image ready to send",
     warning: "Warning",
-    disclaimer: "Decision support does not replace a qualified local expert for high-risk cases."
+    disclaimer: "Decision support does not replace a qualified local expert for high-risk cases.",
+    workspace: "Projects and files",
+    projects: "Projects",
+    projectName: "Project name",
+    projectInstructions: "Project instructions",
+    createProject: "Create project",
+    projectChat: "Start project chat",
+    documents: "Project documents",
+    artifacts: "Generated artifacts",
+    uploadDocument: "Upload document",
+    download: "Download",
+    exportData: "Export my data",
+    noItems: "Nothing here yet"
   }
 } as const;
 

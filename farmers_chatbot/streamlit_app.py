@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from PIL import Image, ImageOps
 
 from .artifacts import ArtifactService
+from .assistant_compat import UnifiedAssistantFacade
 from .auth import IdentityError, UserIdentity, current_streamlit_identity
 from .config import (
     APP_DISPLAY_NAME,
@@ -31,7 +32,7 @@ from .config import (
     PRIVACY_CONTACT_EMAIL,
     RETENTION_DAYS,
 )
-from .deployment_guard import validate_web_runtime
+from .deployment_guard import validate_streamlit_runtime
 from .documents import DocumentService
 from .knowledge import KnowledgeIndex
 from .language import detect_language
@@ -41,7 +42,7 @@ from .legal import (
     privacy_policy_markdown,
     privacy_policy_markdown_ar,
 )
-from .llm import AssistantRequest, AssistantService
+from .llm import AssistantRequest
 from .pilot_store import PilotStore
 from .retention import purge_expired_content
 from .storage_backends import PrivateFileStorage, configured_file_storage
@@ -69,7 +70,7 @@ def get_services() -> tuple[
     PrivateFileStorage,
     TrustedSourceClient,
 ]:
-    validate_web_runtime()
+    validate_streamlit_runtime()
     knowledge = KnowledgeIndex.from_directory()
     pilot_store = PilotStore(
         database_url=os.getenv("DATABASE_URL", ""),
@@ -1183,7 +1184,7 @@ def main() -> None:
     )
     _init_state()
     _apply_ui_style()
-    validate_web_runtime()
+    validate_streamlit_runtime(check_database_revision=False)
     identity = public_identity()
     if identity is None:
         return
@@ -1345,7 +1346,7 @@ def main() -> None:
         trusted_client=trusted_client,
         artifact_service=artifact_service,
     )
-    service = AssistantService(knowledge, tools)
+    service = UnifiedAssistantFacade(knowledge, tools)
     request = AssistantRequest(
         user_id=identity.user_id,
         channel="web",

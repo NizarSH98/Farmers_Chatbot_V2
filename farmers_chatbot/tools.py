@@ -192,7 +192,20 @@ class ToolRegistry:
     @staticmethod
     def _artifact_definitions() -> list[dict[str, Any]]:
         text_array = {"type": "array", "items": {"type": "string"}, "maxItems": 50}
-        source_array = {"type": "array", "items": {"type": "string"}, "maxItems": 20}
+        source_array = {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 20,
+            "description": "Legacy unstructured sources; prefer evidence_ids.",
+        }
+        evidence_array = {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            },
+            "maxItems": 50,
+        }
         language = {"type": "string", "enum": ["arabic", "english"]}
         return [
             {
@@ -208,6 +221,7 @@ class ToolRegistry:
                             "actions": text_array,
                             "assumptions": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "context", "actions", "language"],
@@ -228,6 +242,7 @@ class ToolRegistry:
                             "checks": text_array,
                             "escalation_signs": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "context", "checks", "language"],
@@ -249,6 +264,7 @@ class ToolRegistry:
                             "question_for_expert": {"type": "string"},
                             "urgent_signs": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": [
@@ -292,6 +308,7 @@ class ToolRegistry:
                             },
                             "assumptions": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "entries", "language"],
@@ -304,14 +321,19 @@ class ToolRegistry:
                 "function": {
                     "name": "calculate_enterprise_budget",
                     "description": (
-                        "Calculate a transparent scenario budget and create XLSX. "
-                        "Use only values supplied by the user or explicitly sourced."
+                        "Create a transparent XLSX enterprise budget with break-even, "
+                        "cash-flow, sensitivity, financing/depreciation, provenance, "
+                        "and sustainability impacts. Use only user-supplied values or "
+                        "values linked to evidence_ids."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "title": {"type": "string"},
                             "currency": {"type": "string"},
+                            "geography": {"type": "string"},
+                            "as_of_date": {"type": "string", "format": "date"},
+                            "evidence_ids": evidence_array,
                             "costs": {
                                 "type": "array",
                                 "maxItems": 100,
@@ -319,9 +341,21 @@ class ToolRegistry:
                                     "type": "object",
                                     "properties": {
                                         "item": {"type": "string"},
-                                        "quantity": {"type": "number"},
+                                        "quantity": {"type": "number", "minimum": 0},
                                         "unit": {"type": "string"},
-                                        "unit_cost": {"type": "number"},
+                                        "unit_cost": {"type": "number", "minimum": 0},
+                                        "category": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
                                     },
                                     "required": [
                                         "item",
@@ -339,9 +373,21 @@ class ToolRegistry:
                                     "type": "object",
                                     "properties": {
                                         "item": {"type": "string"},
-                                        "quantity": {"type": "number"},
+                                        "quantity": {"type": "number", "minimum": 0},
                                         "unit": {"type": "string"},
-                                        "unit_price": {"type": "number"},
+                                        "unit_price": {"type": "number", "minimum": 0},
+                                        "category": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
                                     },
                                     "required": [
                                         "item",
@@ -352,10 +398,80 @@ class ToolRegistry:
                                     "additionalProperties": False,
                                 },
                             },
+                            "financing_cost": {"type": "number", "minimum": 0},
+                            "depreciation_cost": {"type": "number", "minimum": 0},
+                            "sensitivity_scenarios": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "quantity_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                        "price_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                        "cost_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                    },
+                                    "required": ["name"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "impacts": {
+                                "type": "array",
+                                "maxItems": 50,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "category": {
+                                            "type": "string",
+                                            "enum": [
+                                                "water",
+                                                "fertilizer",
+                                                "pesticide",
+                                                "energy",
+                                                "labor",
+                                            ],
+                                        },
+                                        "quantity": {"type": "number", "minimum": 0},
+                                        "unit": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
+                                    },
+                                    "required": ["category", "quantity", "unit"],
+                                    "additionalProperties": False,
+                                },
+                            },
                             "assumptions": text_array,
                             "sources": source_array,
                         },
-                        "required": ["title", "currency", "costs", "revenues"],
+                        "required": [
+                            "title",
+                            "currency",
+                            "geography",
+                            "as_of_date",
+                            "costs",
+                            "revenues",
+                        ],
                         "additionalProperties": False,
                     },
                 },

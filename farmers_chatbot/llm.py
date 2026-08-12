@@ -2,27 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import os
-import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
-import requests
-
 from .config import (
-    MODE_PROFILES,
-    OPENROUTER_API_URL,
-    OPENROUTER_DATA_COLLECTION,
-    OPENROUTER_ENFORCE_ZDR,
     ModeProfile,
-    resolve_model_id,
 )
-from .documents import ProjectSearchResult, search_project_chunks
+from .documents import ProjectSearchResult
 from .knowledge import KnowledgeIndex, SearchResult
-from .language import detect_language
 from .tools import ToolRegistry
-from .trusted_sources import requires_live_verification
 
 SYSTEM_PROMPT_VERSION = "raise-pilot-2026-08-v1"
 CLARIFICATION_STYLES = {"auto", "guided", "direct"}
@@ -94,7 +83,7 @@ class AssistantResponse:
 AssistantResult = AssistantResponse
 
 
-class AssistantService:
+class AssistantPromptBuilder:
     def __init__(
         self,
         knowledge: KnowledgeIndex,
@@ -106,274 +95,6 @@ class AssistantService:
         self.tools = tools
         self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY")
         self.timeout_seconds = timeout_seconds
-
-    def answer_request(
-        self,
-        request: AssistantRequest,
-        *,
-        conversation_history: list[dict[str, str]] | None = None,
-    ) -> AssistantResponse:
-        return self.answer(
-            request.text,
-            mode_key=request.mode,
-            model_id=request.model_id,
-            clarification_style=request.clarification_style,
-            conversation_history=conversation_history,
-            attachments=list(request.attachments),
-            project_instructions=request.project_instructions,
-        )
-
-    def answer(
-        self,
-        query: str,
-        *,
-        mode_key: str = "standard",
-        model_id: str | None = None,
-        clarification_style: str = "auto",
-        conversation_history: list[dict[str, str]] | None = None,
-        attachments: list[dict[str, Any]] | None = None,
-        project_instructions: str = "",
-    ) -> AssistantResponse:
-        started = time.perf_counter()
-        profile = MODE_PROFILES.get(mode_key, MODE_PROFILES["standard"])
-        profile = replace(
-            profile,
-            model=resolve_model_id(model_id, profile.model),
-        )
-        if clarification_style not in CLARIFICATION_STYLES:
-            clarification_style = "auto"
-        language = detect_language(query)
-        sources = self.knowledge.search(
-            query,
-            language=language,
-            top_k=profile.top_k,
-        )
-        project_sources = search_project_chunks(
-            self.tools.project_chunks,
-            query,
-            top_k=min(5, profile.top_k),
-        )
-        citations = self._internal_citations(sources)
-        citations.extend(self._project_citations(project_sources))
-        verification_warning = None
-
-        if not self.api_key:
-            return AssistantResponse(
-                answer=self._fallback_answer(query, sources, project_sources, language),
-                sources=sources,
-                model=None,
-                mode=profile.key,
-                language=language,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-                citations=citations,
-                warning=(
-                    "OpenRouter is not configured; showing retrieved guide content."
-                    if language == "english"
-                    else "لم يتم إعداد OpenRouter؛ تُعرض أقرب معلومات من الدليل."
-                ),
-                success=True,
-            )
-
-        trusted_context = ""
-        verification_required = (
-            profile.allow_general_knowledge and requires_live_verification(query)
-        )
-        if verification_required and self.tools.trusted_client:
-            self.tools.trusted_search_calls += 1
-            trusted_result = self.tools.trusted_client.search(query)
-            self.tools.trusted_search_requests += trusted_result.search_requests
-            for citation in trusted_result.citations:
-                item = dict(citation)
-                if item not in citations:
-                    citations.append(item)
-                if item not in self.tools.recent_citations:
-                    self.tools.recent_citations.append(item)
-            if trusted_result.verified:
-                trusted_context = trusted_result.summary
-            else:
-                verification_warning = (
-                    "Current or high-risk information could not be independently "
-                    "verified from the trusted live-source registry."
-                    if language == "english"
-                    else "تعذر التحقق المستقل من المعلومات الحالية أو عالية المخاطر عبر سجل المصادر الموثوقة."
-                )
-        elif verification_required:
-            verification_warning = (
-                "This question benefits from live verification, but trusted search "
-                "is not configured."
-                if language == "english"
-                else "يستفيد هذا السؤال من تحقق مباشر، لكن البحث في المصادر الموثوقة غير معدّ."
-            )
-
-        messages = self._build_messages(
-            query=query,
-            sources=sources,
-            project_sources=project_sources,
-            trusted_context=trusted_context,
-            language=language,
-            profile=profile,
-            history=conversation_history or [],
-            clarification_style=clarification_style,
-            attachments=attachments or [],
-            verification_required=verification_required,
-            project_instructions=project_instructions,
-        )
-        tool_names: list[str] = []
-        try:
-            for round_number in range(profile.max_tool_rounds + 1):
-                payload: dict[str, Any] = {
-                    "model": profile.model,
-                    "messages": messages,
-                    "temperature": profile.temperature,
-                    "max_tokens": profile.max_tokens,
-                    "reasoning": {
-                        "effort": profile.reasoning_effort,
-                        "exclude": True,
-                    },
-                    "provider": {
-                        "data_collection": OPENROUTER_DATA_COLLECTION,
-                        "zdr": OPENROUTER_ENFORCE_ZDR,
-                    },
-                }
-                if round_number < profile.max_tool_rounds:
-                    payload["tools"] = self.tools.model_definitions()
-                    payload["tool_choice"] = "auto"
-                    payload["parallel_tool_calls"] = True
-
-                response = requests.post(
-                    OPENROUTER_API_URL,
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=self.timeout_seconds,
-                )
-                if response.status_code != 200:
-                    return self._error_fallback(
-                        query,
-                        sources,
-                        project_sources,
-                        citations,
-                        language,
-                        profile,
-                        started,
-                        f"http_{response.status_code}",
-                    )
-                data = response.json()
-                message = data["choices"][0]["message"]
-                for annotation in message.get("annotations") or []:
-                    citation = self._annotation_citation(annotation)
-                    if citation and citation not in citations:
-                        citations.append(citation)
-                tool_calls = message.get("tool_calls") or []
-                if not tool_calls:
-                    content = message.get("content")
-                    if not isinstance(content, str) or not content.strip():
-                        raise ValueError("Model returned no answer")
-                    answer, kind = self._normalize_answer_kind(content)
-                    follow_up_questions: list[str] = []
-                    if kind == "answer":
-                        answer, follow_up_questions = extract_follow_up_questions(
-                            answer
-                        )
-                    warning = verification_warning
-                    if (
-                        verification_required
-                        and not any(
-                            item.get("source_type") == "trusted_live"
-                            for item in citations
-                        )
-                        and not warning
-                    ):
-                        warning = (
-                            "A live trusted citation was required but not returned."
-                        )
-                    return AssistantResponse(
-                        answer=answer,
-                        sources=sources,
-                        model=profile.model,
-                        mode=profile.key,
-                        language=language,
-                        duration_ms=int((time.perf_counter() - started) * 1000),
-                        kind=(
-                            "artifact"
-                            if self.tools.recent_artifact_ids and kind == "answer"
-                            else kind
-                        ),
-                        citations=self._dedupe_citations(
-                            [*citations, *self.tools.recent_citations]
-                        ),
-                        tool_names=tool_names,
-                        artifact_ids=list(self.tools.recent_artifact_ids),
-                        warning=warning,
-                        trusted_searches=self.tools.trusted_search_requests,
-                        follow_up_questions=follow_up_questions,
-                    )
-
-                # Preserve provider reasoning metadata required by some models to
-                # continue safely after a tool result. Hidden reasoning is still
-                # excluded from the user-facing response.
-                messages.append(dict(message))
-                for tool_call in tool_calls:
-                    name = tool_call.get("function", {}).get("name", "")
-                    raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
-                    try:
-                        arguments = json.loads(raw_arguments)
-                    except (TypeError, json.JSONDecodeError):
-                        arguments = {}
-                    result = self.tools.execute(name, arguments)
-                    tool_names.append(name)
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.get("id", ""),
-                            "name": name,
-                            "content": result,
-                        }
-                    )
-            raise ValueError("Tool loop ended without a final answer")
-        except requests.Timeout:
-            return self._error_fallback(
-                query,
-                sources,
-                project_sources,
-                citations,
-                language,
-                profile,
-                started,
-                "timeout",
-            )
-        except requests.ConnectionError:
-            return self._error_fallback(
-                query,
-                sources,
-                project_sources,
-                citations,
-                language,
-                profile,
-                started,
-                "connection",
-            )
-        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
-            return self._error_fallback(
-                query,
-                sources,
-                project_sources,
-                citations,
-                language,
-                profile,
-                started,
-                "invalid_response",
-            )
-
-    def _headers(self) -> dict[str, str]:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "X-Title": "RAISE Akkar Farmer Assistant",
-        }
-        public_url = os.getenv("APP_PUBLIC_URL")
-        if public_url:
-            headers["HTTP-Referer"] = public_url
-        return headers
 
     @staticmethod
     def _context(sources: list[SearchResult]) -> str:
@@ -674,37 +395,71 @@ class AssistantService:
             )
         return "\n\n".join(parts)
 
-    def _error_fallback(
+
+
+class AssistantService:
+    """One-release synchronous facade over the canonical async engine.
+
+    This class intentionally contains no provider call, retrieval loop, or tool
+    execution. Those responsibilities belong exclusively to AssistantEngine.
+    """
+
+    def __init__(
+        self,
+        knowledge: KnowledgeIndex,
+        tools: ToolRegistry,
+        api_key: str | None = None,
+        timeout_seconds: float = 40,
+    ) -> None:
+        self.knowledge = knowledge
+        self.tools = tools
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    def answer_request(
+        self,
+        request: AssistantRequest,
+        *,
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> AssistantResponse:
+        from .assistant_compat import UnifiedAssistantFacade
+
+        return UnifiedAssistantFacade(
+            self.knowledge,
+            self.tools,
+            api_key=self.api_key,
+        ).answer_request(
+            request,
+            conversation_history=conversation_history,
+        )
+
+    def answer(
         self,
         query: str,
-        sources: list[SearchResult],
-        project_sources: list[ProjectSearchResult],
-        citations: list[dict[str, Any]],
-        language: str,
-        profile: ModeProfile,
-        started: float,
-        error_type: str,
+        *,
+        mode_key: str = "standard",
+        model_id: str | None = None,
+        clarification_style: str = "auto",
+        conversation_history: list[dict[str, str]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        project_instructions: str = "",
     ) -> AssistantResponse:
-        warning = (
-            "تعذر الاتصال بخدمة النموذج؛ تُعرض المعلومات المسترجعة فقط."
-            if language == "arabic"
-            else "The model service failed; retrieved information is shown instead."
-        )
-        return AssistantResponse(
-            answer=self._fallback_answer(
-                query,
-                sources,
-                project_sources,
-                language,
+        return self.answer_request(
+            AssistantRequest(
+                user_id="legacy-sync-adapter",
+                channel="streamlit",
+                conversation_id="legacy-sync-adapter",
+                project_id=None,
+                text=query,
+                attachments=tuple(attachments or ()),
+                mode=mode_key,
+                model_id=model_id,
+                clarification_style=(
+                    clarification_style
+                    if clarification_style in CLARIFICATION_STYLES
+                    else "auto"
+                ),
+                project_instructions=project_instructions,
             ),
-            sources=sources,
-            model=profile.model,
-            mode=profile.key,
-            language=language,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            citations=citations,
-            warning=warning,
-            success=False,
-            error_type=error_type,
-            trusted_searches=self.tools.trusted_search_requests,
+            conversation_history=conversation_history,
         )

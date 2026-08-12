@@ -1,146 +1,189 @@
+import json
 
+import httpx
 import pytest
 
-from farmers_chatbot.llm import AssistantService, extract_follow_up_questions
+from farmers_chatbot.assistant_pipeline import AssistantEngine
+from farmers_chatbot.config import MODE_PROFILES, resolve_model_id
+from farmers_chatbot.llm import (
+    AssistantPromptBuilder,
+    AssistantRequest,
+    AssistantResponse,
+    AssistantService,
+    extract_follow_up_questions,
+)
+from farmers_chatbot.provider import ProviderClient, ProviderResponse, ProviderUsage
+from farmers_chatbot.tool_executor import ToolExecutor
 from farmers_chatbot.tools import ToolRegistry
 
 
-class FakeResponse:
-    status_code = 200
+def _messages(builder, knowledge, *, query="current question", mode="standard"):
+    return builder._build_messages(
+        query=query,
+        sources=knowledge.search(query, language="english", top_k=3),
+        project_sources=[],
+        trusted_context="",
+        language="english",
+        profile=MODE_PROFILES[mode],
+        history=[
+            {"role": "user", "content": "previous question"},
+            {"role": "assistant", "content": "previous answer"},
+        ],
+        clarification_style="auto",
+        attachments=[],
+        verification_required=False,
+        project_instructions="",
+    )
 
-    def __init__(self, content="Grounded answer [AKKAR-PROFILE-001]"):
-        self.content = content
 
-    def json(self):
-        return {"choices": [{"message": {"content": self.content}}]}
-
-
-def test_missing_key_returns_retrieval_fallback(knowledge, store):
+def test_missing_key_compatibility_facade_returns_canonical_fallback(knowledge, store):
     service = AssistantService(knowledge, ToolRegistry(knowledge, store), api_key="")
     response = service.answer("What is important about potatoes in Akkar?")
     assert response.sources
     assert response.model is None
-    assert response.warning
+    assert response.answer
 
 
-def test_current_question_is_not_duplicated_in_history(monkeypatch, knowledge, store):
+def test_assistant_service_is_only_a_unified_facade(monkeypatch, knowledge, store):
     captured = {}
 
-    def fake_post(url, headers, json, timeout):
-        captured.update(json)
-        return FakeResponse()
+    def fake_answer(self, request, *, conversation_history=None):
+        del self
+        captured["request"] = request
+        captured["history"] = conversation_history
+        return AssistantResponse(
+            answer="canonical",
+            sources=[],
+            model=None,
+            mode=request.mode,
+            language="english",
+            duration_ms=1,
+        )
 
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
+    monkeypatch.setattr(
+        "farmers_chatbot.assistant_compat.UnifiedAssistantFacade.answer_request",
+        fake_answer,
     )
-    service.answer(
-        "current question",
-        conversation_history=[
-            {"role": "user", "content": "previous question"},
-            {"role": "assistant", "content": "previous answer"},
-        ],
+    service = AssistantService(knowledge, ToolRegistry(knowledge, store), api_key="")
+    response = service.answer(
+        "one request",
+        conversation_history=[{"role": "user", "content": "prior"}],
     )
-    raw_messages = captured["messages"]
+    assert response.answer == "canonical"
+    assert captured["request"].text == "one request"
+    assert captured["history"][0]["content"] == "prior"
+
+
+def test_prompt_builder_does_not_duplicate_current_question(knowledge, store):
+    builder = AssistantPromptBuilder(knowledge, ToolRegistry(knowledge, store))
+    messages = _messages(builder, knowledge)
     assert sum(
         "current question" in str(message.get("content", ""))
-        for message in raw_messages
+        for message in messages
     ) == 1
-    assert any(message.get("content") == "previous question" for message in raw_messages)
+    assert any(message.get("content") == "previous question" for message in messages)
 
 
-def test_requested_model_and_privacy_routing_are_applied(
-    monkeypatch,
-    knowledge,
-    store,
-):
+def test_source_only_prompt_disables_general_knowledge(knowledge, store):
+    builder = AssistantPromptBuilder(knowledge, ToolRegistry(knowledge, store))
+    messages = _messages(builder, knowledge, query="Tell me about Akkar", mode="source_only")
+    assert "Use only the supplied project knowledge" in messages[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_provider_client_is_only_http_boundary_and_applies_privacy_policy():
     captured = {}
 
-    def fake_post(url, headers, json, timeout):
-        captured.update(json)
-        return FakeResponse()
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "answer"}}], "usage": {}},
+        )
 
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = ProviderClient(api_key="test-key", client=client)
+    result = await provider.complete(
+        stage="generation_round_1",
+        payload={"model": "minimax/minimax-m3", "messages": []},
     )
-    response = service.answer(
-        "Summarize this farm question",
-        model_id="minimax/minimax-m3",
-    )
-    assert response.model == "minimax/minimax-m3"
-    assert captured["model"] == "minimax/minimax-m3"
-    assert captured["provider"] == {
-        "data_collection": "deny",
-        "zdr": True,
-    }
+    assert result.message["content"] == "answer"
+    assert captured["provider"] == {"data_collection": "deny", "zdr": True}
+    assert provider.records[0].stage == "generation_round_1"
+    await client.aclose()
 
 
-def test_unapproved_requested_model_is_rejected(knowledge, store):
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
-    )
+def test_unapproved_requested_model_is_rejected():
     with pytest.raises(ValueError, match="not enabled"):
-        service.answer("Test", model_id="unapproved/example-model")
+        resolve_model_id("unapproved/example-model", MODE_PROFILES["standard"].model)
 
 
-def test_tool_follow_up_preserves_provider_message_metadata(
-    monkeypatch,
+class _ToolLoopProvider:
+    api_key = "provider-key"
+
+    def __init__(self):
+        self.records = []
+        self.payloads = []
+
+    async def close(self):
+        return None
+
+    async def complete(self, *, stage, payload, timeout=45.0):
+        del stage, timeout
+        self.payloads.append(payload)
+        if len(self.payloads) == 1:
+            message = {
+                "role": "assistant",
+                "content": None,
+                "reasoning_details": [{"type": "encrypted", "data": "opaque"}],
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "convert_agricultural_units",
+                            "arguments": json.dumps(
+                                {
+                                    "value": 1,
+                                    "from_unit": "hectare",
+                                    "to_unit": "dunam",
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "get_logframe_status",
+                            "arguments": "{}",
+                        },
+                    },
+                ],
+            }
+        else:
+            message = {"role": "assistant", "content": "Both tools ran."}
+        return ProviderResponse(message=message, usage=ProviderUsage(), raw={})
+
+
+@pytest.mark.asyncio
+async def test_canonical_tool_loop_preserves_metadata_and_executes_parallel_calls(
     knowledge,
     store,
 ):
-    payloads = []
-
-    def fake_post(url, headers, json, timeout):
-        payloads.append(json)
-        if len(payloads) == 1:
-            response = FakeResponse()
-            response.json = lambda: {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "reasoning_details": [{"type": "encrypted", "data": "opaque"}],
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "convert_agricultural_units",
-                                        "arguments": (
-                                            '{"value": 1, "from_unit": "hectare", '
-                                            '"to_unit": "dunam"}'
-                                        ),
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-            return response
-        return FakeResponse("One hectare is 10 dunams.")
-
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
+    registry = ToolRegistry(knowledge, store)
+    provider = _ToolLoopProvider()
+    engine = AssistantEngine(knowledge, provider=provider)  # type: ignore[arg-type]
+    answer, _, _, tools = await engine._generate_with_tools(
+        messages=[{"role": "user", "content": "run both"}],
+        profile=MODE_PROFILES["standard"],
+        executor=ToolExecutor(registry, max_total_calls=4),
     )
-    response = service.answer(
-        "Convert one hectare to dunams",
-        model_id="moonshotai/kimi-k3",
-    )
-    assert response.success
-    continued_message = payloads[1]["messages"][-2]
-    assert continued_message["reasoning_details"][0]["data"] == "opaque"
+    assert answer == "Both tools ran."
+    assert set(tools) == {"convert_agricultural_units", "get_logframe_status"}
+    assert provider.payloads[0]["parallel_tool_calls"] is True
+    continued = provider.payloads[1]["messages"][-3]
+    assert continued["reasoning_details"][0]["data"] == "opaque"
 
 
 def test_extract_follow_up_questions_splits_trailing_marker_line():
@@ -165,106 +208,18 @@ def test_extract_follow_up_questions_no_marker_is_a_no_op():
 
 
 def test_extract_follow_up_questions_caps_at_three():
-    content = "Answer.\nFOLLOWUP: a? | b? | c? | d?"
-    _, questions = extract_follow_up_questions(content)
+    _, questions = extract_follow_up_questions(
+        "Answer.\nFOLLOWUP: a? | b? | c? | d?"
+    )
     assert questions == ["a?", "b?", "c?"]
 
 
-def test_answer_strips_follow_up_marker_and_populates_field(
-    monkeypatch, knowledge, store
-):
-    def fake_post(url, headers, json, timeout):
-        return FakeResponse(
-            "Practical answer [AKKAR-PROFILE-001]\n"
-            "FOLLOWUP: What is the planting window? | How much water is needed?"
-        )
-
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
+def test_request_type_remains_compatible():
+    request = AssistantRequest(
+        user_id="user",
+        channel="web",
+        conversation_id="conversation",
+        project_id=None,
+        text="question",
     )
-    response = service.answer("Tell me about potatoes in Akkar")
-    assert "FOLLOWUP" not in response.answer
-    assert response.follow_up_questions == [
-        "What is the planting window?",
-        "How much water is needed?",
-    ]
-
-
-def test_parallel_tool_calls_are_all_executed_in_one_round(
-    monkeypatch, knowledge, store
-):
-    payloads = []
-
-    def fake_post(url, headers, json, timeout):
-        payloads.append(json)
-        if len(payloads) == 1:
-            response = FakeResponse()
-            response.json = lambda: {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "convert_agricultural_units",
-                                        "arguments": (
-                                            '{"value": 1, "from_unit": "hectare", '
-                                            '"to_unit": "dunam"}'
-                                        ),
-                                    },
-                                },
-                                {
-                                    "id": "call-2",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "get_logframe_status",
-                                        "arguments": "{}",
-                                    },
-                                },
-                            ],
-                        }
-                    }
-                ]
-            }
-            return response
-        return FakeResponse("Both tools ran.")
-
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
-    )
-    response = service.answer(
-        "Convert one hectare and check status",
-        model_id="moonshotai/kimi-k3",
-    )
-    assert response.success
-    assert payloads[0]["parallel_tool_calls"] is True
-    tool_messages = [m for m in payloads[1]["messages"] if m.get("role") == "tool"]
-    assert {m["tool_call_id"] for m in tool_messages} == {"call-1", "call-2"}
-
-
-def test_source_only_prompt_disables_general_knowledge(monkeypatch, knowledge, store):
-    captured = {}
-
-    def fake_post(url, headers, json, timeout):
-        captured.update(json)
-        return FakeResponse()
-
-    monkeypatch.setattr("farmers_chatbot.llm.requests.post", fake_post)
-    service = AssistantService(
-        knowledge,
-        ToolRegistry(knowledge, store),
-        api_key="test-placeholder",
-    )
-    service.answer("Tell me about Akkar", mode_key="source_only")
-    assert "Use only the supplied project knowledge" in captured["messages"][0]["content"]
-
+    assert request.mode == "standard"

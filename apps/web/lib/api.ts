@@ -1,4 +1,4 @@
-import type { StreamEvent, TurnPayload } from "./types";
+import type { StreamEvent, TurnPayload, TurnStatusResponse } from "./types";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
   .replace(/\/$/, "");
@@ -9,6 +9,18 @@ export class ApiError extends Error {
   constructor(status: number, message: string) {
     super(message);
     this.status = status;
+  }
+}
+
+export class IncompleteTurnError extends Error {
+  turnId?: string;
+  requestId: string;
+
+  constructor(requestId: string, turnId?: string) {
+    super("The response stream ended before the turn completed");
+    this.name = "IncompleteTurnError";
+    this.requestId = requestId;
+    this.turnId = turnId;
   }
 }
 
@@ -55,17 +67,49 @@ export async function uploadImage(
   });
 }
 
+export async function downloadPrivateFile(
+  path: string,
+  token: string,
+  filename: string
+): Promise<void> {
+  const response = await fetch(API_URL + path, {
+    headers: { Authorization: "Bearer " + token },
+    cache: "no-store"
+  });
+  if (!response.ok) throw new ApiError(response.status, response.statusText);
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function getTurn(
+  turnId: string,
+  token: string
+): Promise<TurnStatusResponse> {
+  return apiFetch<TurnStatusResponse>(
+    "/v1/turns/" + encodeURIComponent(turnId),
+    token
+  );
+}
+
 export async function* streamTurn(
   payload: TurnPayload,
   token: string,
   signal: AbortSignal
 ): AsyncGenerator<StreamEvent> {
+  const requestId = crypto.randomUUID();
   const response = await fetch(API_URL + "/v1/turns", {
     method: "POST",
     headers: {
       Authorization: "Bearer " + token,
       "Content-Type": "application/json",
-      "X-Request-ID": crypto.randomUUID()
+      "Idempotency-Key": requestId,
+      "X-Request-ID": requestId
     },
     body: JSON.stringify(payload),
     cache: "no-store",
@@ -87,30 +131,50 @@ export async function* streamTurn(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+  let turnId: string | undefined;
+
+  const parseBlock = (block: string): StreamEvent | null => {
+    let event = "message";
+    const dataLines: string[] = [];
+    block.split(/\r?\n/).forEach((line) => {
+      if (line.startsWith("event:")) {
+        event = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    });
+    if (!dataLines.length) return null;
+    return {
+      event,
+      data: JSON.parse(dataLines.join("\n")) as Record<string, unknown>
+    };
+  };
+
   while (true) {
     const { value, done } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      let event = "message";
-      const dataLines: string[] = [];
-      block.split(/\r?\n/).forEach((line) => {
-        if (line.startsWith("event:")) {
-          event = line.slice(6).trim();
-        } else if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).trim());
-        }
-      });
-      if (dataLines.length) {
-        yield {
-          event,
-          data: JSON.parse(dataLines.join("\n")) as Record<string, unknown>
-        };
+    let boundary = buffer.match(/\r?\n\r?\n/);
+    while (boundary?.index !== undefined) {
+      const block = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      const parsed = parseBlock(block);
+      if (parsed) {
+        if (typeof parsed.data.turn_id === "string") turnId = parsed.data.turn_id;
+        if (parsed.event === "turn.completed") completed = true;
+        yield parsed;
       }
-      boundary = buffer.indexOf("\n\n");
+      boundary = buffer.match(/\r?\n\r?\n/);
     }
-    if (done) break;
+    if (done) {
+      const parsed = parseBlock(buffer);
+      if (parsed) {
+        if (typeof parsed.data.turn_id === "string") turnId = parsed.data.turn_id;
+        if (parsed.event === "turn.completed") completed = true;
+        yield parsed;
+      }
+      break;
+    }
   }
+  if (!completed) throw new IncompleteTurnError(requestId, turnId);
 }

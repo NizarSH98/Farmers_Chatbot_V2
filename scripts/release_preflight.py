@@ -33,6 +33,7 @@ def main() -> int:
 
     required = {
         '.github/workflows/ci.yml',
+        'alembic.ini',
         'deployment/streamlit_secrets.toml.example',
         'farmers_chatbot/legal.py',
         'legal/PRIVACY_POLICY.ar.md',
@@ -40,6 +41,8 @@ def main() -> int:
         'legal/USER_AGREEMENT.ar.md',
         'legal/USER_AGREEMENT.en.md',
         'migrations/001_pilot_schema.sql',
+        'migrations/env.py',
+        'migrations/versions/20260811_0001_legacy_schema_baseline.py',
         'rag_chatbot.py',
         'render.yaml',
         'requirements.txt',
@@ -54,10 +57,14 @@ def main() -> int:
     render = (ROOT / 'render.yaml').read_text(encoding='utf-8')
     if 'autoDeploy: false' not in render or 'plan: starter' not in render:
         errors.append('Render must use the paid starter plan with autoDeploy disabled.')
+    if 'preDeployCommand: alembic upgrade head' not in render:
+        errors.append('Render must apply Alembic migrations before service startup.')
 
     requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8')
     if 'streamlit==' not in requirements:
         errors.append('Pin Streamlit exactly for reproducible Community Cloud builds.')
+    if 'alembic>=' not in requirements:
+        errors.append('Alembic must be installed as a runtime deployment dependency.')
 
     secrets = (ROOT / 'deployment/streamlit_secrets.toml.example').read_text(
         encoding='utf-8'

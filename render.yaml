@@ -4,6 +4,7 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: alembic upgrade head
     startCommand: uvicorn farmers_chatbot.web_api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     autoDeploy: false
@@ -15,7 +16,9 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: ENABLE_TRUSTED_WEB_SEARCH
-        value: "true"
+        value: "false"
+      - key: LIVE_SOURCE_REGISTRY_PATH
+        value: config/live_sources.v1.json
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY
@@ -30,31 +33,15 @@ services:
         value: raise-private
       - key: APP_PUBLIC_URL
         sync: false
-
-  - type: web
-    name: raise-esdu-whatsapp-pilot
-    runtime: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn whatsapp_api:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /healthz
-    autoDeploy: false
-    envVars:
-      - key: APP_ENV
-        value: pilot
-      - key: DATABASE_URL
+      - key: PRIVACY_CONTACT_EMAIL
         sync: false
-      - key: OPENROUTER_API_KEY
-        sync: false
-      - key: ENABLE_TRUSTED_WEB_SEARCH
-        value: "true"
-      - key: META_APP_SECRET
-        sync: false
-      - key: META_VERIFY_TOKEN
-        sync: false
-      - key: META_ACCESS_TOKEN
-        sync: false
-      - key: META_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_ID_SECRET
-        generateValue: true
+      # Locked off until the canonical web app completes its seven-day soak.
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      # Vector cutover remains blocked until the bilingual embedding gate passes.
+      - key: RAG_VECTOR_BENCHMARK_APPROVED
+        value: "false"
+      - key: RAG_EMBEDDING_BENCHMARK_REPORT
+        value: ""
+      - key: RAG_EMBEDDING_BENCHMARK_SHA256
+        value: ""

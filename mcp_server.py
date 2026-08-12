@@ -10,11 +10,15 @@ HTTP transport on a public interface.
 from __future__ import annotations
 
 import os
+import time
+import uuid
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from farmers_chatbot.artifacts import ArtifactService
+from farmers_chatbot.assistant_compat import UnifiedAssistantFacade
+from farmers_chatbot.assistant_contracts import TurnCommand
 from farmers_chatbot.auth import development_identity
 from farmers_chatbot.config import ENABLE_TRUSTED_WEB_SEARCH
 from farmers_chatbot.documents import search_project_chunks
@@ -24,6 +28,7 @@ from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.storage_backends import configured_file_storage
 from farmers_chatbot.tools import ToolRegistry
 from farmers_chatbot.trusted_sources import TrustedSourceClient
+from farmers_chatbot.turn_coordinator import TurnCoordinator
 
 knowledge = KnowledgeIndex.from_directory()
 store = EvidenceStore()
@@ -45,6 +50,7 @@ registry = ToolRegistry(
     trusted_client=trusted_client,
     artifact_service=artifact_service,
 )
+coordinator = TurnCoordinator(pilot_store)
 mcp = FastMCP(
     "RAISE Akkar Agricultural Knowledge",
     instructions=(
@@ -52,6 +58,115 @@ mcp = FastMCP(
         "evidence-based RAISE logframe status. Dynamic facts require dated approved sources."
     ),
 )
+
+
+@mcp.tool()
+def ask_raise(
+    text: str,
+    consent: bool,
+    mode: str = "standard",
+    project_id: str = "",
+    conversation_id: str = "",
+    request_id: str = "",
+) -> dict[str, Any]:
+    """Run a consented, quota-accounted turn through the canonical assistant engine."""
+
+    if not consent:
+        return {
+            "success": False,
+            "error_type": "consent_required",
+            "message": "Explicit consent is required before an assistant turn.",
+        }
+    pilot_store.accept_consent(mcp_user["id"])
+    if project_id:
+        project = pilot_store.get_project(mcp_user["id"], project_id)
+        project_chunks = pilot_store.list_project_chunks(mcp_user["id"], project_id)
+    else:
+        project = None
+        project_chunks = []
+    if conversation_id:
+        pilot_store.get_conversation(mcp_user["id"], conversation_id)
+    else:
+        conversation_id = pilot_store.create_conversation(
+            mcp_user["id"], "MCP assistant turn", project_id=project_id or None
+        )
+    command = TurnCommand(
+        request_id=request_id or str(uuid.uuid4()),
+        actor_id=mcp_user["id"],
+        channel="mcp",
+        conversation_id=conversation_id,
+        project_id=project_id or None,
+        text=text,
+        mode=mode,
+        project_instructions=str(project.get("instructions") or "") if project else "",
+    )
+    reservation = coordinator.reserve(
+        command,
+        language="ar" if any("\u0600" <= char <= "\u06ff" for char in text) else "en",
+        stored_attachments=[],
+        clarification_count=0,
+    )
+    if not reservation.allowed:
+        return {"success": False, "error_type": "quota", "message": reservation.message}
+    if reservation.existing:
+        return coordinator.status(mcp_user["id"], str(reservation.turn_id))
+
+    turn_registry = ToolRegistry(
+        knowledge,
+        store,
+        project_chunks=project_chunks,
+        trusted_client=trusted_client,
+        artifact_service=artifact_service,
+    )
+    history = [
+        {"role": item["role"], "content": item["content"]}
+        for item in pilot_store.list_messages(
+            mcp_user["id"], conversation_id, limit=30
+        )
+        if item["id"] != reservation.user_message_id
+    ]
+    started = time.perf_counter()
+    try:
+        result, prepared = UnifiedAssistantFacade(
+            knowledge,
+            turn_registry,
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+        ).execute_turn(command, conversation_history=history)
+        message_id = coordinator.finalize(
+            command,
+            str(reservation.turn_id),
+            result,
+            analysis={
+                **prepared.analysis.to_dict(),
+                "retrieval": prepared.retrieval_metrics,
+                "graph_paths": prepared.graph_paths,
+            },
+            terminal_sequence=1,
+        )
+    except Exception as exc:
+        coordinator.fail(
+            mcp_user["id"],
+            str(reservation.turn_id),
+            status="failed",
+            error_type=type(exc).__name__,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            terminal_sequence=1,
+        )
+        raise
+    return {
+        "success": result.success,
+        "turn_id": reservation.turn_id,
+        "request_id": command.request_id,
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "kind": result.kind,
+        "content": result.content,
+        "language": result.language,
+        "citations": result.citations,
+        "warnings": result.warnings,
+        "tools_used": result.tools_used,
+        "artifact_ids": result.artifact_ids,
+    }
 
 
 @mcp.tool()

@@ -9,14 +9,16 @@ import statistics
 import sys
 import tempfile
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from farmers_chatbot.assistant_compat import UnifiedAssistantFacade
 from farmers_chatbot.knowledge import KnowledgeIndex
-from farmers_chatbot.llm import AssistantService
+from farmers_chatbot.llm import AssistantRequest
 from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.tools import ToolRegistry
 
@@ -60,12 +62,21 @@ def main() -> int:
         knowledge = KnowledgeIndex.from_directory()
         evidence = EvidenceStore(Path(temp_dir) / "runtime.sqlite3")
         tools = ToolRegistry(knowledge, evidence)
-        service = AssistantService(knowledge, tools, api_key=key)
+        service = UnifiedAssistantFacade(knowledge, tools, api_key=key)
 
         def run(index: int) -> dict:
             question = QUESTIONS[index % len(QUESTIONS)]
             started = time.perf_counter()
-            response = service.answer(question, mode_key=args.mode)
+            response = service.answer_request(
+                AssistantRequest(
+                    user_id="benchmark",
+                    channel="test",
+                    conversation_id=str(uuid.uuid4()),
+                    project_id=None,
+                    text=question,
+                    mode=args.mode,
+                )
+            )
             return {
                 "duration_ms": int((time.perf_counter() - started) * 1000),
                 "success": response.success,

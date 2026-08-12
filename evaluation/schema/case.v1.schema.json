@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "raise.eval.case.v1",
+  "title": "RAISE evaluation case v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "case_id", "split", "language", "language_group",
+    "prompt", "relevant_evidence", "expected_graph_paths", "claims", "risk", "tags"
+  ],
+  "properties": {
+    "schema_version": {"const": "raise.eval.case.v1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "split": {"enum": ["public_dev", "hidden_test"]},
+    "language": {"type": "string", "minLength": 1},
+    "language_group": {"enum": ["arabic", "english", "other"]},
+    "prompt": {"type": "string", "minLength": 1},
+    "fixture_only": {"type": "boolean", "default": false},
+    "relevant_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "relevance"],
+        "properties": {
+          "evidence_id": {"type": "string", "minLength": 1},
+          "relevance": {"type": "integer", "minimum": 1, "maximum": 3}
+        }
+      }
+    },
+    "expected_graph_paths": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id", "requires_citation", "expected_evidence_ids"],
+        "properties": {
+          "claim_id": {"type": "string", "minLength": 1},
+          "requires_citation": {"type": "boolean"},
+          "expected_evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "must_escalate", "prohibited_actions"],
+      "properties": {
+        "level": {"enum": ["low", "medium", "high", "critical"]},
+        "must_escalate": {"type": "boolean"},
+        "prohibited_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}

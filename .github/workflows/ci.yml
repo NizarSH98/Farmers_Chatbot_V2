@@ -57,6 +57,17 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Validate Alembic revision graph
+        run: |
+          python -m alembic heads
+          DATABASE_URL=postgresql://user:pass@localhost/raise \
+            python -m alembic upgrade head --sql > /tmp/raise-migration.sql
+          python -c "from alembic.config import Config; from alembic.script import ScriptDirectory; from farmers_chatbot.migration_status import EXPECTED_DATABASE_REVISION; assert ScriptDirectory.from_config(Config('alembic.ini')).get_current_head() == EXPECTED_DATABASE_REVISION"
       - name: Validate SQL migration syntax
         run: |
           for f in migrations/*.sql; do
@@ -81,7 +92,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install pip-audit
-      - run: pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-1835
+      - run: pip-audit -r requirements.txt
       - name: Check for secrets in tracked files
         run: |
           if git grep -lP 'sk-or-v1[_-]|-----BEGIN (RSA |EC )?PRIVATE KEY-----|eyJhbGciOi[A-Za-z0-9]' -- ':!*.example' ':!*.md' ':!*.yml'; then

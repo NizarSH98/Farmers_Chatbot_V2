@@ -4,6 +4,7 @@ export interface AppConfig {
   app_name: string;
   agreement_version: string;
   default_language: Language;
+  corpus_warning?: { ar: string; en: string } | null;
   modes: Array<{
     id: string;
     label_en: string;
@@ -40,6 +41,35 @@ export interface Conversation {
   archived: number | boolean;
   created_at: string;
   updated_at: string;
+  project_id?: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  instructions: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  project_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface Artifact {
+  id: string;
+  project_id?: string | null;
+  conversation_id?: string | null;
+  artifact_type: string;
+  filename: string;
+  mime_type: string;
+  created_at: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Citation {
@@ -70,6 +100,7 @@ export interface Message {
     mime_type?: string;
     storage_path?: string;
   }>;
+  artifact_ids?: string[];
   created_at: string;
   pending?: boolean;
   feedback?: "helpful" | "not_helpful";
@@ -79,6 +110,15 @@ export interface Message {
 export interface StreamEvent {
   event: string;
   data: Record<string, unknown>;
+}
+
+export interface TurnStatusResponse {
+  turn_id: string;
+  request_id: string;
+  status: string;
+  terminal: boolean;
+  message?: Message | null;
+  error?: string | null;
 }
 
 export interface TurnPayload {

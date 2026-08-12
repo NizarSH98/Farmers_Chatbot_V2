@@ -5,12 +5,13 @@ Arabic-first, bilingual agricultural decision support for farmers and agri-food 
 The project combines:
 
 - a source-traceable Akkar and ESDU knowledge base;
-- an authenticated Streamlit workspace with persistent chats and projects;
-- Google OIDC, Supabase Postgres/private storage, and local SQLite fallbacks;
+- a modern Arabic-first Next.js workspace with persistent chats and projects;
+- Supabase authentication, PostgreSQL/pgvector, and private storage;
 - Quick, Standard, Deep, and Source-only answer modes;
-- risk-based internal retrieval, trusted live search, and bounded tool calling;
+- risk-based internal retrieval, authorized direct live-source connectors, and
+  bounded tool calling;
 - a local MCP server;
-- a signed Meta WhatsApp test-number webhook service;
+- a mounted but disabled Meta WhatsApp router for post-soak activation;
 - optional local Whisper speech-to-text;
 - consent-aware feedback and performance evidence;
 - direct traceability to `RAISE_Logframe_final.xlsx`.
@@ -21,10 +22,23 @@ The project combines:
 
 The goal is to make useful agricultural knowledge easier to access for Lebanese farmers, starting with Akkar. A strong answer must be more than fluent: it should fit the farmer's locality and production system, expose its sources and limitations, support Arabic use, learn from field feedback, and avoid pretending that fast-changing prices, weather, alerts, or regulations are static facts.
 
-## Current capabilities
+## Current architecture and capabilities
 
-- 21 bilingual Akkar-focused knowledge items with stable IDs and institutional sources.
-- Hybrid word/character retrieval in English and Arabic.
+- One canonical asynchronous assistant engine and provider client shared by web,
+  frozen Streamlit compatibility, mounted-but-disabled WhatsApp, and MCP.
+- Atomic, idempotent turn reservation/finalization with provider usage, cost,
+  latency, tool, retrieval, citation, and terminal-state records.
+- Versioned PostgreSQL GraphRAG schema for releases, passages, bilingual aliases,
+  claims, evidence-backed relations, project chunks, and atomic activation/
+  rollback.
+- A provider-independent bilingual ontology with 162 entities across all 21
+  domain types, 352 aliases, and 183 passage-evidenced relations. Graph lookup
+  is word-boundary safe, bidirectional, cycle-safe, and bounded to two hops.
+- Lexical plus graph retrieval remains active while vector cutover is blocked on
+  the hidden bilingual embedding benchmark.
+- The DOCX-derived canonical and Arabic Markdown drafts are generated locally
+  and validated; all 21 legacy JSON items have one merge owner or an explicit
+  exclusion so JSON and Markdown cannot be double-indexed.
 - Source cards showing knowledge ID, evidence class, review status, risk class, and source links.
 - Current mode profiles:
   - **Quick:** low-cost, short response.
@@ -46,8 +60,9 @@ The goal is to make useful agricultural knowledge easier to access for Lebanese 
   - `record_feedback` with explicit consent
 - Local-stdio MCP server exposing bounded knowledge, source, conversion, artifact,
   logframe, and feedback tools without shell or arbitrary URL access.
-- FastAPI WhatsApp pilot adapter with signature/phone-ID verification,
-  deduplication, HMAC identities, commands, and shared quotas.
+- Disabled FastAPI WhatsApp router with signature/phone-ID
+  verification, HMAC identities, coordinator-owned quotas/idempotency, and
+  persisted-turn delivery retry.
 - Online Edge TTS with explicit disclosure.
 - Optional local Whisper input when the voice dependencies are installed.
 
@@ -57,23 +72,27 @@ The editable knowledge source is:
 
 ```text
 knowledge_base/
-├── guide.json       # bilingual reviewed-item candidates
-├── sources.json     # source register
-└── README.md        # review rules
+├── agrifood_knowledge_draft_v0.2.md     # canonical bilingual GraphRAG draft
+├── agrifood_knowledge_draft_v0.2_ar.md  # Arabic review companion
+├── guide.json                           # legacy bilingual candidates
+├── sources.json                         # source register
+└── README.md                            # review and regeneration rules
 ```
 
-`scripts/build_guide.py` renders the structured source into
-`knowledge_base/RAISE_Akkar_Agricultural_Guide.md` for internal review.
+`scripts/convert_agrifood_docx.py` deterministically rebuilds both v0.2
+Markdown files without an external translation service. The legacy
+`scripts/build_guide.py` path remains available only for comparison during the
+one-release migration.
 
 The legacy `Agricultural Guide for Lebanon.pdf` remains for migration and comparison. The application now retrieves from the structured knowledge base so claims can be reviewed, versioned, and retired individually.
 
-The initial expansion covers:
+The draft expansion covers:
 
 - Akkar plain versus upland/terraced contexts;
 - dated Ministry of Agriculture production signals;
 - potato, greenhouse, orchard, water, soil, livestock, post-harvest, and market decision checklists;
-- ESDU's participatory-development and living-lab approach;
-- ESDU work on livestock resilience, sprouting units, composting, rainwater harvesting, zaatar/coriander, dairy, rural women, community-market links, and legumes;
+- crop/livestock, soil/water, IPM, greenhouse, post-harvest, food-safety,
+  business, troubleshooting, referral, and dynamic-evidence decision paths;
 - safety boundaries and expert escalation;
 - dynamic information that must come from a timestamped tool.
 
@@ -87,9 +106,19 @@ Use Python 3.12:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
-streamlit run rag_chatbot.py
+alembic upgrade head
+uvicorn farmers_chatbot.web_api:app --reload --port 8000
+```
+
+Run the canonical frontend in a second terminal with Node.js 22.12 or newer:
+
+```powershell
+Set-Location apps/web
+Copy-Item .env.example .env.local
+npm ci
+npm run dev
 ```
 
 Add a deployment-specific OpenRouter key to `.env` if connected generation is required:
@@ -98,7 +127,9 @@ Add a deployment-specific OpenRouter key to `.env` if connected generation is re
 OPENROUTER_API_KEY=your_key_here
 ```
 
-Without a key, the app remains usable as a retrieval interface and clearly labels that fallback.
+The local development profile may be used for offline retrieval tests. Pilot and
+production startup fail closed when connected database, storage, migration,
+origin, provider, consent, retention, or model settings are invalid.
 
 ## Voice options
 
@@ -177,16 +208,13 @@ Software metrics and contractual achievement are reported separately. Code canno
 
 ## Deployment
 
-The first internal deployment target is Streamlit Community Cloud with Google OIDC
-and portable PostgreSQL/private object storage currently supplied by Supabase,
-followed by the optional Render/Meta test-number service only after web gates pass.
-Use `docs/PILOT_DEPLOYMENT_RUNBOOK.md` for owner setup, managed secrets,
-20–30-user rehearsal gates, freeze, rollback, and WhatsApp verification. The
-contractual workbook is local evidence and is deliberately excluded from deployed
-runtime source.
-Continue development on `pilot`; deploy Streamlit from the protected
-`release/pilot-2026-08` branch so Community Cloud's automatic GitHub updates cannot
-change the frozen test build.
+The locked pilot topology is Next.js on Vercel, one FastAPI backend on Render,
+and Supabase-managed PostgreSQL/auth/private storage. Streamlit is a frozen
+one-release compatibility client and must not receive a new hosted deployment.
+WhatsApp remains disabled until the canonical web app completes a clean
+seven-day soak; its thin router is already mounted in the same FastAPI
+deployment. Use `docs/CANONICAL_PILOT_RUNBOOK.md` for backup/restore, live
+migration, release gates, soak, rollback, and canary requirements.
 
 ## Safety and privacy
 

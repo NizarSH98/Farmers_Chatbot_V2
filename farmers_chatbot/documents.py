@@ -5,23 +5,27 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import mimetypes
+import os
 import re
+import subprocess
+import sys
 import uuid
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
-from docx import Document
-from openpyxl import load_workbook
-from PyPDF2 import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import FeatureUnion
 from sklearn.preprocessing import normalize
 
 from .config import MAX_PROJECT_FILE_BYTES, MAX_PROJECT_FILES
+from .graph_ingestion import ProjectChunkRecord, normalize_search_text
+from .graph_repository import GraphRepository
+from .language import detect_language
 from .pilot_store import PilotStore
 from .storage_backends import PrivateFileStorage
 
@@ -40,6 +44,13 @@ ALLOWED_MIME_TYPES = {
 MAX_EXTRACTED_CHARACTERS = 250_000
 MAX_ARCHIVE_FILES = 1000
 MAX_ARCHIVE_UNCOMPRESSED = 50 * 1024 * 1024
+MAX_ARCHIVE_ENTRY_BYTES = 20 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 200
+MAX_PDF_PAGES = 200
+DOCUMENT_PARSE_TIMEOUT_SECONDS = 12.0
+DOCUMENT_PARSER_MEMORY_BYTES = 512 * 1024 * 1024
+DOCUMENT_PARSER_CPU_SECONDS = 10
+MAX_WORKER_RESPONSE_BYTES = (MAX_EXTRACTED_CHARACTERS * 4) + 65_536
 
 
 @dataclass(frozen=True)
@@ -78,9 +89,30 @@ def _validate_zip(data: bytes) -> None:
             if total > MAX_ARCHIVE_UNCOMPRESSED:
                 raise ValueError("Office file expands beyond the pilot safety limit")
             for info in infos:
-                candidate = Path(info.filename)
-                if candidate.is_absolute() or ".." in candidate.parts:
+                normalized_name = info.filename.replace("\\", "/")
+                candidate = PurePosixPath(normalized_name)
+                if (
+                    candidate.is_absolute()
+                    or ".." in candidate.parts
+                    or normalized_name.startswith("//")
+                    or re.match(r"^[A-Za-z]:/", normalized_name)
+                ):
                     raise ValueError("Office file contains an unsafe path")
+                unix_mode = (info.external_attr >> 16) & 0xFFFF
+                if unix_mode & 0o170000 == 0o120000:
+                    raise ValueError("Office file contains an unsafe symbolic link")
+                if info.flag_bits & 0x1:
+                    raise ValueError("Encrypted Office files are not accepted")
+                if info.file_size > MAX_ARCHIVE_ENTRY_BYTES:
+                    raise ValueError("Office file contains an oversized embedded file")
+                if info.file_size and info.compress_size == 0:
+                    raise ValueError("Office file contains an invalid compressed entry")
+                if (
+                    info.compress_size
+                    and info.file_size / info.compress_size
+                    > MAX_ARCHIVE_COMPRESSION_RATIO
+                ):
+                    raise ValueError("Office file contains a suspicious compression ratio")
     except zipfile.BadZipFile as exc:
         raise ValueError("Office document is not a valid ZIP-based file") from exc
 
@@ -94,40 +126,66 @@ def _decode_text(data: bytes) -> str:
     raise ValueError("Text encoding is not supported")
 
 
+def _run_isolated_extraction(extension: str, data: bytes) -> str:
+    worker = Path(__file__).with_name("document_parser_worker.py")
+    command = [
+        sys.executable,
+        str(worker),
+        extension,
+        str(MAX_EXTRACTED_CHARACTERS),
+        str(MAX_PDF_PAGES),
+        str(MAX_PROJECT_FILE_BYTES),
+        str(DOCUMENT_PARSER_MEMORY_BYTES),
+        str(DOCUMENT_PARSER_CPU_SECONDS),
+    ]
+    creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation_flags,
+    )
+    try:
+        output, _stderr = process.communicate(
+            data,
+            timeout=DOCUMENT_PARSE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise ValueError("Document parsing exceeded the safety time limit") from exc
+
+    if len(output) > MAX_WORKER_RESPONSE_BYTES:
+        raise ValueError("Document parser output exceeded the safety limit")
+    try:
+        response = json.loads(output.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Document parser failed safely") from exc
+    if process.returncode != 0 or not response.get("ok"):
+        message = response.get("error")
+        if not isinstance(message, str) or not message:
+            message = "Document parser failed safely"
+        raise ValueError(message)
+    text = response.get("text")
+    if not isinstance(text, str):
+        raise ValueError(  # noqa: TRY004 - upload API exposes safe ValueError failures
+            "Document parser returned an invalid response"
+        )
+    return text
+
+
 def extract_document_text(filename: str, data: bytes) -> str:
     extension = Path(filename).suffix.lower()
+    if not data or len(data) > MAX_PROJECT_FILE_BYTES:
+        raise ValueError("File must be non-empty and no larger than 10 MB")
     if extension == ".pdf":
         if not data.startswith(b"%PDF-"):
             raise ValueError("PDF signature is invalid")
-        reader = PdfReader(io.BytesIO(data))
-        if reader.is_encrypted:
-            raise ValueError("Encrypted PDFs are not accepted")
-        text = "\n\n".join((page.extract_text() or "") for page in reader.pages[:200])
-    elif extension == ".docx":
+        return _run_isolated_extraction(extension, data)
+    elif extension in {".docx", ".xlsx"}:
         _validate_zip(data)
-        document = Document(io.BytesIO(data))
-        parts = [paragraph.text for paragraph in document.paragraphs]
-        for table in document.tables:
-            parts.extend(
-                " | ".join(cell.text for cell in row.cells) for row in table.rows
-            )
-        text = "\n".join(parts)
-    elif extension == ".xlsx":
-        _validate_zip(data)
-        workbook = load_workbook(
-            io.BytesIO(data),
-            read_only=True,
-            data_only=True,
-        )
-        lines: list[str] = []
-        for sheet in workbook.worksheets[:20]:
-            lines.append(f"Sheet: {sheet.title}")
-            for row in sheet.iter_rows(max_row=5000, values_only=True):
-                values = [str(value) for value in row if value not in {None, ""}]
-                if values:
-                    lines.append(" | ".join(values))
-        workbook.close()
-        text = "\n".join(lines)
+        return _run_isolated_extraction(extension, data)
     elif extension == ".csv":
         decoded = _decode_text(data)
         rows = csv.reader(io.StringIO(decoded))
@@ -185,8 +243,6 @@ class DocumentService:
         data: bytes,
         mime_type: str | None = None,
     ) -> str:
-        if self.store.document_count(owner_user_id, project_id) >= MAX_PROJECT_FILES:
-            raise ValueError(f"A project can contain at most {MAX_PROJECT_FILES} files")
         if not data or len(data) > MAX_PROJECT_FILE_BYTES:
             raise ValueError("File must be non-empty and no larger than 10 MB")
 
@@ -198,9 +254,22 @@ class DocumentService:
         if supplied_mime and supplied_mime not in ALLOWED_MIME_TYPES[extension]:
             raise ValueError("File extension and media type do not match")
 
+        digest = hashlib.sha256(data).hexdigest()
+        existing = next(
+            (
+                item
+                for item in self.store.list_documents(owner_user_id, project_id)
+                if item.get("sha256") == digest
+            ),
+            None,
+        )
+        if existing:
+            return str(existing["id"])
+        if self.store.document_count(owner_user_id, project_id) >= MAX_PROJECT_FILES:
+            raise ValueError(f"A project can contain at most {MAX_PROJECT_FILES} files")
+
         text = extract_document_text(cleaned_name, data)
         chunks = chunk_text(text)
-        digest = hashlib.sha256(data).hexdigest()
         storage_path = (
             f"users/{owner_user_id}/projects/{project_id}/documents/"
             f"{uuid.uuid4()}-{cleaned_name}"
@@ -212,7 +281,7 @@ class DocumentService:
         )
         self.storage.put(storage_path, data, detected_mime)
         try:
-            return self.store.add_document(
+            document_id = self.store.add_document(
                 owner_user_id,
                 project_id,
                 filename=cleaned_name,
@@ -222,8 +291,43 @@ class DocumentService:
                 size_bytes=len(data),
                 chunks=chunks,
             )
+            if self.store.is_postgres:
+                records = tuple(
+                    ProjectChunkRecord(
+                        id=str(item["id"]),
+                        owner_user_id=owner_user_id,
+                        project_id=project_id,
+                        document_id=document_id,
+                        chunk_index=int(item["chunk_index"]),
+                        content=str(item["text_content"]),
+                        normalized_content=normalize_search_text(
+                            str(item["text_content"])
+                        ),
+                        contextualized_content=(
+                            f"{cleaned_name}\n\n{item['text_content']}"
+                        ),
+                        content_hash=hashlib.sha256(
+                            str(item["text_content"]).encode("utf-8")
+                        ).hexdigest(),
+                        language=detect_language(str(item["text_content"])),
+                        metadata={"filename": cleaned_name},
+                    )
+                    for item in self.store.list_project_chunks(
+                        owner_user_id, project_id
+                    )
+                    if str(item["document_id"]) == document_id
+                )
+                GraphRepository(self.store._connect).upsert_project_chunks(records)
+            return document_id
         except Exception:
             self.storage.delete(storage_path)
+            if "document_id" in locals():
+                try:
+                    self.store.delete_document(
+                        owner_user_id, project_id, document_id
+                    )
+                except ValueError:
+                    pass
             raise
 
     def delete(

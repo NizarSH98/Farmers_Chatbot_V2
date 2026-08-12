@@ -1,0 +1,5 @@
+{
+  "schema_version": "raise-live-sources-v1",
+  "sources": [],
+  "operator_note": "Add only exact, approved HTTPS endpoints. Set authorized=true only after access, licensing, freshness, and reliability review."
+}

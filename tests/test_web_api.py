@@ -167,6 +167,67 @@ async def test_conversation_crud(client: httpx.AsyncClient) -> None:
     assert response.status_code == 204
 
 
+async def test_project_document_and_export_parity(
+    client: httpx.AsyncClient,
+) -> None:
+    await client.post("/v1/consent", headers=AUTH)
+    project = await client.post(
+        "/v1/projects",
+        headers=AUTH,
+        json={"name": "Potato season", "instructions": "Prioritize Akkar."},
+    )
+    assert project.status_code == 201
+    project_id = project.json()["id"]
+    conversation = await client.post(
+        "/v1/conversations",
+        headers=AUTH,
+        json={"title": "Project chat", "project_id": project_id},
+    )
+    assert conversation.status_code == 201
+    assert conversation.json()["project_id"] == project_id
+
+    uploaded = await client.post(
+        f"/v1/projects/{project_id}/documents",
+        headers=AUTH,
+        files={
+            "document": (
+                "field-notes.txt",
+                b"Akkar field observations\n\nIrrigation pressure is uneven.",
+                "text/plain",
+            )
+        },
+    )
+    assert uploaded.status_code == 201
+    document_id = uploaded.json()["id"]
+    listed = await client.get(
+        f"/v1/projects/{project_id}/documents", headers=AUTH
+    )
+    assert [item["id"] for item in listed.json()["items"]] == [document_id]
+    download = await client.get(
+        f"/v1/projects/{project_id}/documents/{document_id}/download",
+        headers=AUTH,
+    )
+    assert download.status_code == 200
+    assert download.content.startswith(b"Akkar field observations")
+
+    exported = await client.get("/v1/export", headers=AUTH)
+    assert exported.status_code == 200
+    assert any(item["id"] == project_id for item in exported.json()["projects"])
+    assert any(
+        item["id"] == document_id for item in exported.json()["documents"]
+    )
+
+    deleted = await client.delete(
+        f"/v1/projects/{project_id}/documents/{document_id}", headers=AUTH
+    )
+    assert deleted.status_code == 204
+    missing = await client.get(
+        f"/v1/projects/{project_id}/documents/{document_id}/download",
+        headers=AUTH,
+    )
+    assert missing.status_code == 404
+
+
 async def test_conversation_not_found(client: httpx.AsyncClient) -> None:
     await client.post("/v1/consent", headers=AUTH)
     response = await client.get(
@@ -231,6 +292,60 @@ async def test_sse_turn_stream(client: httpx.AsyncClient) -> None:
     roles = [item["role"] for item in items]
     assert "user" in roles
     assert "assistant" in roles
+
+
+async def test_turn_idempotency_and_persisted_recovery(
+    client: httpx.AsyncClient,
+) -> None:
+    await client.post("/v1/consent", headers=AUTH)
+    created = await client.post(
+        "/v1/conversations", headers=AUTH, json={"title": "Recovery"}
+    )
+    cid = created.json()["id"]
+    turn_payload = {
+        "conversation_id": cid,
+        "text": "How can I improve irrigation efficiency?",
+        "mode": "standard",
+        "clarification_style": "auto",
+        "attachment_ids": [],
+    }
+    headers = {
+        **AUTH,
+        "Idempotency-Key": "stable-turn-key",
+        "X-Request-ID": "compatibility-alias-is-ignored",
+    }
+    first = await client.post("/v1/turns", headers=headers, json=turn_payload)
+    assert first.status_code == 200
+    first_events = _parse_sse(first.text)
+    accepted = next(item for item in first_events if item["event"] == "turn.accepted")
+    turn_id = accepted["data"]["turn_id"]
+    assert accepted["data"]["request_id"] == "stable-turn-key"
+    assert all("sequence" in item["data"] for item in first_events)
+
+    status = await client.get(f"/v1/turns/{turn_id}", headers=AUTH)
+    assert status.status_code == 200
+    state = status.json()
+    assert state["terminal"] is True
+    assert state["request_id"] == "stable-turn-key"
+    assert state["message"]["role"] == "assistant"
+
+    replay = await client.post("/v1/turns", headers=headers, json=turn_payload)
+    replay_events = _parse_sse(replay.text)
+    assert replay_events[-1]["event"] == "turn.completed"
+    assert replay_events[-1]["data"]["replayed"] is True
+    assert replay_events[-1]["data"]["turn_id"] == turn_id
+
+    messages = await client.get(
+        f"/v1/conversations/{cid}/messages", headers=AUTH
+    )
+    assert len(messages.json()["items"]) == 2
+
+    conflict = await client.post(
+        "/v1/turns",
+        headers=headers,
+        json={**turn_payload, "text": "different payload"},
+    )
+    assert conflict.status_code == 409
 
 
 async def test_turn_invalid_mode(client: httpx.AsyncClient) -> None:

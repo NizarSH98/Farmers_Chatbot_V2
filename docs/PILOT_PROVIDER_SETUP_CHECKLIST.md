@@ -1,5 +1,9 @@
 # Pilot Provider Setup Checklist
 
+> Archived topology checklist. Use `docs/CANONICAL_PILOT_RUNBOOK.md` for the
+> Next.js + one FastAPI + Supabase pilot. Do not provision Streamlit or a second
+> WhatsApp Render service from the historical steps below.
+
 This is the owner-operated sequence for the authenticated web pilot. Do not paste
 real credentials into GitHub files, issues, email, or chat.
 
@@ -37,7 +41,8 @@ with no commits during the session, not an assumed auto-deploy toggle.
 - [ ] Create a dedicated project; use Pro for the formal test if pilot evidence
   must be recoverable. Enable MFA on administrator accounts.
 - [ ] Select the institutionally approved region and record it.
-- [ ] Apply `migrations/001_pilot_schema.sql` in SQL Editor.
+- [ ] Follow `docs/DATABASE_MIGRATIONS.md`: back up and rehearse restoration, run
+  `alembic upgrade head`, and confirm `alembic current --check`.
 - [ ] Create `pilot-files` with Public bucket disabled. Add no anonymous storage
   policies. The server-side service key bypasses RLS and must never reach a browser.
 - [ ] Use the shared pooler session-mode URI for the persistent Streamlit backend

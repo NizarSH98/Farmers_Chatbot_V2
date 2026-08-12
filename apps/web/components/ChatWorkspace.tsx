@@ -8,7 +8,11 @@ import {
   ChevronDown,
   CircleStop,
   Clipboard,
+  DatabaseBackup,
+  Download,
   Ellipsis,
+  FileText,
+  FolderKanban,
   Globe2,
   ImagePlus,
   Leaf,
@@ -25,23 +29,35 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  Upload,
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ApiError, apiFetch, streamTurn, uploadImage } from "@/lib/api";
+import {
+  ApiError,
+  downloadPrivateFile,
+  getTurn,
+  IncompleteTurnError,
+  apiFetch,
+  streamTurn,
+  uploadImage
+} from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { mergePreservingClientState } from "@/lib/messages";
 import { supabaseBrowser } from "@/lib/supabase";
 import type {
   AppConfig,
+  Artifact,
   Citation,
   Conversation,
   CurrentUser,
   Language,
   Message,
+  Project,
+  ProjectDocument,
   TurnPayload,
   UsageSummary
 } from "@/lib/types";
@@ -80,6 +96,7 @@ export function ChatWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agreement, setAgreement] = useState("");
   const [agreementOpen, setAgreementOpen] = useState(false);
+  const [corpusWarningVisible, setCorpusWarningVisible] = useState(false);
   const [search, setSearch] = useState("");
   const [dialog, setDialog] = useState<DialogState>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -90,9 +107,18 @@ export function ChatWorkspace() {
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState("");
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [projectDocuments, setProjectDocuments] = useState<ProjectDocument[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [projectName, setProjectName] = useState("");
+  const [projectInstructions, setProjectInstructions] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const documentRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const token = session?.access_token || "";
@@ -161,6 +187,14 @@ export function ChatWorkspace() {
     }
   }, []);
 
+  const revealCorpusWarning = useCallback((appConfig: AppConfig) => {
+    if (!appConfig.corpus_warning) return;
+    const key = `raise-corpus-warning:${appConfig.agreement_version}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "shown");
+    setCorpusWarningVisible(true);
+  }, []);
+
   const bootstrap = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -184,6 +218,7 @@ export function ChatWorkspace() {
         setAgreement(legal.markdown);
         setAgreementOpen(true);
       } else {
+        revealCorpusWarning(appConfig);
         const items = await loadConversations(token);
         if (items[0]) setActiveId((value) => value || items[0].id);
         void loadUsage(token);
@@ -193,7 +228,7 @@ export function ChatWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [language, loadConversations, loadUsage, text, token]);
+  }, [language, loadConversations, loadUsage, revealCorpusWarning, text, token]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void bootstrap(), 0);
@@ -238,6 +273,7 @@ export function ChatWorkspace() {
       await apiFetch("/v1/consent", token, { method: "POST" });
       setAgreementOpen(false);
       setProfile((value) => value ? { ...value, consent_current: true } : value);
+      revealCorpusWarning(config);
       const items = await loadConversations(token);
       if (items[0]) setActiveId(items[0].id);
       void loadUsage(token);
@@ -246,11 +282,14 @@ export function ChatWorkspace() {
     }
   };
 
-  const createConversation = async () => {
+  const createConversation = async (projectId?: string, title?: string) => {
     if (!token) return null;
     const created = await apiFetch<Conversation>("/v1/conversations", token, {
       method: "POST",
-      body: JSON.stringify({ title: text("newChat") })
+      body: JSON.stringify({
+        title: title || text("newChat"),
+        project_id: projectId || null
+      })
     });
     setConversations((items) => [created, ...items]);
     setActiveId(created.id);
@@ -311,11 +350,12 @@ export function ChatWorkspace() {
     setSending(true);
     setStatusStage("analysis_and_retrieval");
     let conversationId = activeId;
+    let assistantId = "";
     try {
       if (!conversationId) conversationId = await createConversation();
       if (!conversationId) throw new Error(text("error"));
       const userId = crypto.randomUUID();
-      const assistantId = crypto.randomUUID();
+      assistantId = crypto.randomUUID();
       const now = new Date().toISOString();
       const optimisticUser: Message = {
         id: userId,
@@ -397,6 +437,48 @@ export function ChatWorkspace() {
         setMessages((items) => items.map((item) =>
           item.pending ? { ...item, pending: false, status: "cancelled" } : item
         ));
+      } else if (caught instanceof IncompleteTurnError) {
+        let recovered = false;
+        if (caught.turnId) {
+          try {
+            const turn = await getTurn(caught.turnId, token);
+            if (turn.terminal && turn.message) {
+              setMessages((items) => items.map((item) =>
+                item.id === assistantId
+                  ? { ...turn.message!, clientKey: item.clientKey, pending: false }
+                  : item
+              ));
+              recovered = true;
+            } else if (turn.terminal && turn.error) {
+              setError(turn.error);
+              patchPending(assistantId, { pending: false, status: "failed" });
+              recovered = true;
+            }
+          } catch {
+            // The conversation refresh below is the final recovery source.
+          }
+        }
+        if (!recovered) {
+          patchPending(assistantId, { pending: false, status: "interrupted" });
+          setError(text("error"));
+        }
+        try {
+          const fresh = await apiFetch<{ items: Message[] }>(
+            "/v1/conversations/" + conversationId + "/messages?limit=100",
+            token
+          );
+          setMessages((previous) => {
+            const merged = mergePreservingClientState(fresh.items, previous);
+            const localAssistant = previous.find((item) =>
+              item.clientKey === assistantId
+            );
+            return localAssistant && !fresh.items.some((item) => item.id === localAssistant.id)
+              ? [...merged, localAssistant]
+              : merged;
+          });
+        } catch {
+          // Keep the recovered/interrupted local state when refresh is unavailable.
+        }
       } else {
         const message = caught instanceof ApiError
           ? caught.message
@@ -508,6 +590,148 @@ export function ChatWorkspace() {
     }
   };
 
+  const loadWorkspace = async (preferredProjectId?: string) => {
+    if (!token) return;
+    setWorkspaceBusy(true);
+    try {
+      const [projectResult, artifactResult] = await Promise.all([
+        apiFetch<{ items: Project[] }>("/v1/projects", token),
+        apiFetch<{ items: Artifact[] }>("/v1/artifacts", token)
+      ]);
+      setProjects(projectResult.items);
+      setArtifacts(artifactResult.items);
+      const nextProjectId = preferredProjectId
+        || selectedProjectId
+        || projectResult.items[0]?.id
+        || "";
+      setSelectedProjectId(nextProjectId);
+      if (nextProjectId) {
+        const documentResult = await apiFetch<{ items: ProjectDocument[] }>(
+          "/v1/projects/" + nextProjectId + "/documents",
+          token
+        );
+        setProjectDocuments(documentResult.items);
+      } else {
+        setProjectDocuments([]);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const openWorkspace = () => {
+    setWorkspaceOpen(true);
+    setMobileSidebar(false);
+    void loadWorkspace();
+  };
+
+  const chooseProject = async (projectId: string) => {
+    if (!token) return;
+    setSelectedProjectId(projectId);
+    setWorkspaceBusy(true);
+    try {
+      const result = await apiFetch<{ items: ProjectDocument[] }>(
+        "/v1/projects/" + projectId + "/documents",
+        token
+      );
+      setProjectDocuments(result.items);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const createProject = async () => {
+    if (!token || !projectName.trim()) return;
+    setWorkspaceBusy(true);
+    try {
+      const created = await apiFetch<Project>("/v1/projects", token, {
+        method: "POST",
+        body: JSON.stringify({
+          name: projectName.trim(),
+          instructions: projectInstructions.trim()
+        })
+      });
+      setProjectName("");
+      setProjectInstructions("");
+      await loadWorkspace(created.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const deleteProject = async (projectId: string) => {
+    if (!token) return;
+    setWorkspaceBusy(true);
+    try {
+      await apiFetch("/v1/projects/" + projectId, token, { method: "DELETE" });
+      setSelectedProjectId("");
+      await loadWorkspace();
+      await loadConversations(token);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+      setWorkspaceBusy(false);
+    }
+  };
+
+  const uploadProjectDocument = async (file?: File) => {
+    if (!file || !token || !selectedProjectId) return;
+    setWorkspaceBusy(true);
+    try {
+      const form = new FormData();
+      form.set("document", file);
+      await apiFetch(
+        "/v1/projects/" + selectedProjectId + "/documents",
+        token,
+        { method: "POST", body: form }
+      );
+      await chooseProject(selectedProjectId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+      setWorkspaceBusy(false);
+    } finally {
+      if (documentRef.current) documentRef.current.value = "";
+    }
+  };
+
+  const deleteProjectDocument = async (documentId: string) => {
+    if (!token || !selectedProjectId) return;
+    await apiFetch(
+      "/v1/projects/" + selectedProjectId + "/documents/" + documentId,
+      token,
+      { method: "DELETE" }
+    );
+    await chooseProject(selectedProjectId);
+  };
+
+  const startProjectChat = async () => {
+    const project = projects.find((item) => item.id === selectedProjectId);
+    if (!project) return;
+    await createConversation(project.id, project.name);
+    setWorkspaceOpen(false);
+  };
+
+  const exportWorkspace = async () => {
+    if (!token) return;
+    try {
+      const data = await apiFetch<Record<string, unknown>>("/v1/export", token);
+      const url = URL.createObjectURL(new Blob([
+        JSON.stringify(data, null, 2)
+      ], { type: "application/json" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "raise-workspace-export.json";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : text("error"));
+    }
+  };
+
   const filteredConversations = useMemo(() => {
     const query = search.trim().toLocaleLowerCase(language);
     return conversations.filter((conversation) =>
@@ -602,6 +826,14 @@ export function ChatWorkspace() {
         >
           <MessageSquarePlus aria-hidden="true" />
           {sidebarOpen && <span>{text("newChat")}</span>}
+        </button>
+        <button
+          className={sidebarOpen ? "workspace-button" : "icon-button rail-new"}
+          onClick={openWorkspace}
+          type="button"
+        >
+          <FolderKanban aria-hidden="true" />
+          {sidebarOpen && <span>{text("workspace")}</span>}
         </button>
         {sidebarOpen && (
           <>
@@ -722,6 +954,19 @@ export function ChatWorkspace() {
           </div>
         )}
 
+        {corpusWarningVisible && config.corpus_warning && (
+          <div className="corpus-warning" role="status">
+            <span>{config.corpus_warning[language]}</span>
+            <button
+              aria-label={text("close")}
+              onClick={() => setCorpusWarningVisible(false)}
+              type="button"
+            >
+              <X />
+            </button>
+          </div>
+        )}
+
         <section className="message-scroll" aria-live="polite">
           {messages.length === 0 ? (
             <div className="welcome-panel">
@@ -781,6 +1026,23 @@ export function ChatWorkspace() {
                           ))}
                         </ol>
                       </details>
+                    )}
+                    {message.artifact_ids && message.artifact_ids.length > 0 && (
+                      <div className="artifact-actions">
+                        {message.artifact_ids.map((artifactId, artifactIndex) => (
+                          <button
+                            key={artifactId}
+                            onClick={() => void downloadPrivateFile(
+                              "/v1/artifacts/" + artifactId + "/download",
+                              token,
+                              "RAISE-artifact-" + (artifactIndex + 1)
+                            )}
+                            type="button"
+                          >
+                            <Download />{text("download")} {artifactIndex + 1}
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {message.quickReplies && message.quickReplies.length > 0 && !sending && (
                       <div className="quick-replies">
@@ -929,6 +1191,158 @@ export function ChatWorkspace() {
           <p className="composer-note">{text("disclaimer")}</p>
         </footer>
       </main>
+
+      {workspaceOpen && (
+        <div className="modal-layer" onMouseDown={() => setWorkspaceOpen(false)} role="presentation">
+          <section
+            aria-labelledby="workspace-title"
+            aria-modal="true"
+            className="modal-card workspace-modal"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">RAISE</p>
+                <h2 id="workspace-title">{text("workspace")}</h2>
+              </div>
+              <button aria-label={text("close")} className="icon-button" onClick={() => setWorkspaceOpen(false)} type="button">
+                <X />
+              </button>
+            </div>
+            <div className="workspace-grid">
+              <aside className="project-panel">
+                <h3>{text("projects")}</h3>
+                <div className="project-create">
+                  <input
+                    aria-label={text("projectName")}
+                    maxLength={100}
+                    onChange={(event) => setProjectName(event.target.value)}
+                    placeholder={text("projectName")}
+                    value={projectName}
+                  />
+                  <textarea
+                    aria-label={text("projectInstructions")}
+                    maxLength={5000}
+                    onChange={(event) => setProjectInstructions(event.target.value)}
+                    placeholder={text("projectInstructions")}
+                    rows={3}
+                    value={projectInstructions}
+                  />
+                  <button className="primary-button" disabled={!projectName.trim() || workspaceBusy} onClick={() => void createProject()} type="button">
+                    <FolderKanban />{text("createProject")}
+                  </button>
+                </div>
+                <nav className="project-list" aria-label={text("projects")}>
+                  {projects.length === 0 && <p>{text("noItems")}</p>}
+                  {projects.map((project) => (
+                    <button
+                      className={selectedProjectId === project.id ? "selected" : ""}
+                      key={project.id}
+                      onClick={() => void chooseProject(project.id)}
+                      type="button"
+                    >
+                      <FolderKanban />
+                      <span><strong>{project.name}</strong><small>{project.instructions}</small></span>
+                    </button>
+                  ))}
+                </nav>
+              </aside>
+              <div className="workspace-detail">
+                {selectedProjectId ? (
+                  <>
+                    <div className="workspace-detail-header">
+                      <div>
+                        <h3>{projects.find((item) => item.id === selectedProjectId)?.name}</h3>
+                        <p>{projects.find((item) => item.id === selectedProjectId)?.instructions}</p>
+                      </div>
+                      <div className="workspace-inline-actions">
+                        <button className="secondary-button" onClick={() => void startProjectChat()} type="button">
+                          <MessageSquarePlus />{text("projectChat")}
+                        </button>
+                        <button
+                          aria-label={text("delete")}
+                          className="icon-button danger-text"
+                          onClick={() => {
+                            if (window.confirm(text("deleteConfirm"))) void deleteProject(selectedProjectId);
+                          }}
+                          type="button"
+                        >
+                          <Trash2 />
+                        </button>
+                      </div>
+                    </div>
+                    <section className="workspace-section">
+                      <div className="workspace-section-title">
+                        <h4><FileText />{text("documents")}</h4>
+                        <input
+                          accept=".pdf,.docx,.txt,.csv,.xlsx"
+                          className="visually-hidden"
+                          onChange={(event) => void uploadProjectDocument(event.target.files?.[0])}
+                          ref={documentRef}
+                          type="file"
+                        />
+                        <button className="secondary-button" disabled={workspaceBusy} onClick={() => documentRef.current?.click()} type="button">
+                          <Upload />{text("uploadDocument")}
+                        </button>
+                      </div>
+                      {projectDocuments.length === 0 ? <p>{text("noItems")}</p> : (
+                        <div className="workspace-file-list">
+                          {projectDocuments.map((document) => (
+                            <div key={document.id}>
+                              <FileText />
+                              <span><strong>{document.filename}</strong><small>{Math.ceil(document.size_bytes / 1024)} KB</small></span>
+                              <button aria-label={text("download")} className="icon-button" onClick={() => void downloadPrivateFile(
+                                "/v1/projects/" + selectedProjectId + "/documents/" + document.id + "/download",
+                                token,
+                                document.filename
+                              )} type="button"><Download /></button>
+                              <button
+                                aria-label={text("delete")}
+                                className="icon-button danger-text"
+                                onClick={() => {
+                                  if (window.confirm(text("deleteConfirm"))) void deleteProjectDocument(document.id);
+                                }}
+                                type="button"
+                              ><Trash2 /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                    <section className="workspace-section">
+                      <div className="workspace-section-title"><h4><Download />{text("artifacts")}</h4></div>
+                      {artifacts.filter((item) => item.project_id === selectedProjectId).length === 0 ? <p>{text("noItems")}</p> : (
+                        <div className="workspace-file-list">
+                          {artifacts.filter((item) => item.project_id === selectedProjectId).map((artifact) => (
+                            <div key={artifact.id}>
+                              <FileText />
+                              <span><strong>{artifact.filename}</strong><small>{artifact.artifact_type}</small></span>
+                              <button aria-label={text("download")} className="icon-button" onClick={() => void downloadPrivateFile(
+                                "/v1/artifacts/" + artifact.id + "/download",
+                                token,
+                                artifact.filename
+                              )} type="button"><Download /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  </>
+                ) : (
+                  <div className="workspace-empty"><FolderKanban /><p>{text("noItems")}</p></div>
+                )}
+              </div>
+            </div>
+            <div className="workspace-footer">
+              <button className="secondary-button" onClick={() => void exportWorkspace()} type="button">
+                <DatabaseBackup />{text("exportData")}
+              </button>
+              {workspaceBusy && <span>{text("loading")}</span>}
+            </div>
+          </section>
+        </div>
+      )}
 
       {agreementOpen && (
         <div className="modal-layer" role="presentation">

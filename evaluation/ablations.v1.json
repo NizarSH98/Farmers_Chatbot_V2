@@ -1,0 +1,68 @@
+{
+  "schema_version": "raise.eval.ablations.v1",
+  "definitions": [
+    {
+      "id": "legacy_tfidf",
+      "label": "Legacy TF-IDF",
+      "lexical": true,
+      "vector": false,
+      "contextual_chunks": false,
+      "graph_hops": 0,
+      "tools": false
+    },
+    {
+      "id": "vector_only",
+      "label": "Vector only",
+      "lexical": false,
+      "vector": true,
+      "contextual_chunks": false,
+      "graph_hops": 0,
+      "tools": false
+    },
+    {
+      "id": "hybrid",
+      "label": "Lexical and vector hybrid",
+      "lexical": true,
+      "vector": true,
+      "contextual_chunks": false,
+      "graph_hops": 0,
+      "tools": false
+    },
+    {
+      "id": "contextual_hybrid",
+      "label": "Contextual hybrid",
+      "lexical": true,
+      "vector": true,
+      "contextual_chunks": true,
+      "graph_hops": 0,
+      "tools": false
+    },
+    {
+      "id": "hybrid_graph",
+      "label": "Contextual hybrid plus graph",
+      "lexical": true,
+      "vector": true,
+      "contextual_chunks": true,
+      "graph_hops": 2,
+      "tools": false
+    },
+    {
+      "id": "full_raise",
+      "label": "Full RAISE",
+      "lexical": true,
+      "vector": true,
+      "contextual_chunks": true,
+      "graph_hops": 2,
+      "tools": true
+    },
+    {
+      "id": "base_no_rag_tools",
+      "label": "RAISE base model without retrieval or tools",
+      "lexical": false,
+      "vector": false,
+      "contextual_chunks": false,
+      "graph_hops": 0,
+      "tools": false
+    }
+  ]
+}

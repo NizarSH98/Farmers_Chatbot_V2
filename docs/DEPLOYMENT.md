@@ -1,10 +1,10 @@
 # Deployment and Pilot Release
 
-Last updated: 2026-08-01
+Last updated: 2026-08-11
 
-> For the authenticated Streamlit/Supabase/Google and Meta test-number pilot,
-> use `docs/PILOT_DEPLOYMENT_RUNBOOK.md`. This older checklist remains as the
-> general release baseline.
+> Historical Streamlit-era checklist. Do not use sections 3 or 5 to create a
+> deployment. The authoritative Next.js + one FastAPI + Supabase procedure is
+> `docs/CANONICAL_PILOT_RUNBOOK.md`.
 
 ## 1. Pre-release approvals
 

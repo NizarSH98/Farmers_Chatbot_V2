@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 from urllib.parse import quote
@@ -146,4 +147,12 @@ class SupabasePrivateStorage:
 def configured_file_storage() -> PrivateFileStorage:
     if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
         return SupabasePrivateStorage()
+    if os.getenv("APP_ENV", "development").strip().lower() in {
+        "pilot",
+        "production",
+    }:
+        raise RuntimeError(
+            "Hosted file storage requires SUPABASE_URL and "
+            "SUPABASE_SERVICE_ROLE_KEY; local fallback is disabled."
+        )
     return LocalPrivateStorage()

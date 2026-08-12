@@ -1,6 +1,11 @@
 # ESDU Internal AI Pilot Deployment Runbook
 
-Last updated: 2026-08-01
+Last updated: 2026-08-11
+
+> Archived Streamlit-era runbook retained for rollout history. Do not provision
+> the topology below. Use `docs/CANONICAL_PILOT_RUNBOOK.md`; it makes Next.js
+> canonical, deploys one Render FastAPI backend, and keeps WhatsApp disabled
+> until the seven-day web soak passes.
 Release freeze target: 2026-08-05  
 Internal-test size: 20–30 simultaneous users; open registration with a verified
 Google account
@@ -17,7 +22,8 @@ never Git, issue trackers, documents, or chat.
   dependency consistency, and the local service benchmark.
 - Web entry point: `rag_chatbot.py`.
 - WhatsApp entry point: `whatsapp_api:app`.
-- Postgres migration: `migrations/001_pilot_schema.sql`.
+- PostgreSQL migrations: Alembic, with the adoption and rollback procedure in
+  `docs/DATABASE_MIGRATIONS.md`.
 - Render blueprint: `render.yaml` with automatic deployment disabled.
 - Streamlit secrets template: `deployment/streamlit_secrets.toml.example`.
 - Provider-neutral export/restore procedure: `docs/DATA_PORTABILITY.md`.
@@ -62,7 +68,8 @@ http://localhost:8501/oauth2callback
 1. Create a dedicated pilot Supabase project in the approved region.
 2. Record the project URL, service-role key, and hosted Postgres pooler URI in the
    password manager.
-3. Open SQL Editor and execute `migrations/001_pilot_schema.sql`.
+3. Back up and rehearse restoration, then run `alembic upgrade head` with the
+   direct migration connection. Confirm `alembic current --check` before startup.
 4. In Storage, create a bucket named `pilot-files` and keep **Public bucket**
    disabled.
 5. Do not add anonymous read/write policies. The server uses the service role,
@@ -78,9 +85,10 @@ http://localhost:8501/oauth2callback
    - history survives an application restart/redeployment;
    - 30-day cleanup removes private content and anonymizes older metrics.
 
-Do not release if the app silently falls back to hosted SQLite. In Streamlit
-Community Cloud, `DATABASE_URL`, `SUPABASE_URL`, and
-`SUPABASE_SERVICE_ROLE_KEY` must all be present.
+Do not release if a hosted service can fall back to SQLite or local object storage.
+Hosted startup requires the expected Alembic revision, `DATABASE_URL`,
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and the surface-specific auth and
+origin settings.
 
 ## 4. Google OAuth setup
 
