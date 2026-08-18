@@ -1,0 +1,271 @@
+{
+  "source_doc_sha256": "3C0BAF8145E4A2E287BA5783F8AB26A7CEAE1C5340322C1EE065887CC9B75B0E",
+  "chapters": [
+    {
+      "chapter": 1,
+      "disposition": "product_documentation",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Product purpose belongs in product documentation."
+    },
+    {
+      "chapter": 2,
+      "disposition": "product_documentation",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "User-experience requirements belong in product documentation and evaluation."
+    },
+    {
+      "chapter": 3,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-scope-local-context"
+      ],
+      "retained_body_blocks": 7,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 4,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-scope-local-context"
+      ],
+      "retained_body_blocks": 8,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 5,
+      "disposition": "removed_scaffolding",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Unmeasured product-differentiation claims are not farmer knowledge."
+    },
+    {
+      "chapter": 6,
+      "disposition": "non_retrieval_governance",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Source-authority rules are enforced by ingestion and retained in the appendix."
+    },
+    {
+      "chapter": 7,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-dynamic-information"
+      ],
+      "retained_body_blocks": 6,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 8,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-scope-local-context"
+      ],
+      "retained_body_blocks": 8,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 9,
+      "disposition": "removed_unverified_claims",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Institutional service claims require an approved supporting passage."
+    },
+    {
+      "chapter": 10,
+      "disposition": "removed_unverified_claims",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Institutional project outcomes require an approved supporting passage."
+    },
+    {
+      "chapter": 11,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-crop-production"
+      ],
+      "retained_body_blocks": 8,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 12,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-livestock"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 13,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-soil-management"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 14,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-water-irrigation"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 15,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-ipm-safety"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 16,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-ipm-safety"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 17,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-climate-season"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 18,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-greenhouse"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 19,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-postharvest"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 20,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-food-processing-safety"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 21,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-business-markets"
+      ],
+      "retained_body_blocks": 9,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 22,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-troubleshooting"
+      ],
+      "retained_body_blocks": 10,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 23,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-decision-rules"
+      ],
+      "retained_body_blocks": 7,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 24,
+      "disposition": "removed_unverified_claims",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Institution-specific case claims require passage-level and institutional review."
+    },
+    {
+      "chapter": 25,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-faq"
+      ],
+      "retained_body_blocks": 13,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 26,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-misconceptions"
+      ],
+      "retained_body_blocks": 10,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 27,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-referrals"
+      ],
+      "retained_body_blocks": 8,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 28,
+      "disposition": "retained",
+      "knowledge_ids": [
+        "kb-terminology"
+      ],
+      "retained_body_blocks": 7,
+      "reason": "Substantive guidance is mapped to the listed knowledge record IDs."
+    },
+    {
+      "chapter": 29,
+      "disposition": "non_retrieval_provenance",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Provenance records are consolidated in the non-retrievable source register."
+    },
+    {
+      "chapter": 30,
+      "disposition": "non_retrieval_validation",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Knowledge gaps are retained as an editorial backlog, not farmer guidance."
+    },
+    {
+      "chapter": 31,
+      "disposition": "moved_to_evaluation",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Benchmark prompts and answers are excluded from retrieval."
+    },
+    {
+      "chapter": 32,
+      "disposition": "non_retrieval_governance",
+      "knowledge_ids": [],
+      "retained_body_blocks": 0,
+      "reason": "Approval and change history belongs in editor and release metadata."
+    }
+  ]
+}

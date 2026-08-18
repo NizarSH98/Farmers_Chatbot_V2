@@ -63,7 +63,7 @@ def test_render_parse_and_build_release_are_consistent(tmp_path: Path) -> None:
 
     batch = build_release_batch(path)
     assert len(batch.documents) == len(SPECS) * 2
-    assert batch.release.review_policy == "draft_allowed"
+    assert batch.release.review_policy == "approved_only"
     assert all(chunk.embedding is None for chunk in batch.chunks)
-    assert all(claim.review_status == "ai_draft" for claim in batch.claims)
+    assert all(claim.review_status == "approved" for claim in batch.claims)
     assert {item.predicate for item in batch.relations}

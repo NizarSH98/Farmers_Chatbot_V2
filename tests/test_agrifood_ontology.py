@@ -15,7 +15,7 @@ from farmers_chatbot.knowledge_markdown import parse_knowledge_markdown
 from farmers_chatbot.knowledge_release import build_release_batch
 
 ROOT = Path(__file__).resolve().parents[1]
-MARKDOWN = ROOT / "knowledge_base" / "agrifood_knowledge_draft_v0.2.md"
+MARKDOWN = ROOT / "knowledge_base" / "agrifood_knowledge_v0.3.en.md"
 GOLD = ROOT / "evaluation" / "fixtures" / "ontology_gold.v1.json"
 
 
@@ -79,7 +79,7 @@ def test_release_compiles_every_relation_with_passage_evidence() -> None:
         evidence.excerpt in chunks[evidence.chunk_id].content
         for evidence in evidence_by_relation.values()
     )
-    assert all(item.review_status == "ai_draft" for item in batch.relations)
+    assert all(item.review_status == "approved" for item in batch.relations)
     assert all(
         item.qualifiers["ontology_version"] == ONTOLOGY_VERSION
         for item in batch.relations

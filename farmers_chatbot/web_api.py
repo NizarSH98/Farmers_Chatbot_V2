@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+import httpx
 from fastapi import (
     Depends,
     FastAPI,
@@ -55,6 +56,8 @@ from .language import detect_language
 from .legal import agreement_markdown, agreement_markdown_ar
 from .pilot_store import IdempotencyConflict, PilotStore, TurnReservation
 from .provider import ProviderClient
+from .qdrant_projection import ProjectionConfig, QdrantProjectionRepository
+from .qdrant_retrieval import QdrantGraphRetrieval
 from .retention import purge_expired_content
 from .retrieval import LegacyHybridRetrieval, PostgresGraphRetrieval
 from .storage_backends import PrivateFileStorage, configured_file_storage
@@ -151,7 +154,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     auth = SupabaseAuthClient()
     provider = ProviderClient(api_key=settings.openrouter_api_key)
     retrieval = None
-    if store.is_postgres:
+    rag_backend = os.getenv("RAG_BACKEND", "postgres").strip().lower()
+    if rag_backend not in {"legacy", "postgres", "qdrant"}:
+        raise RuntimeError(
+            "RAG_BACKEND must be one of legacy, postgres, or qdrant"
+        )
+    if store.is_postgres and rag_backend != "legacy":
         vector_approved = (
             os.getenv("RAG_VECTOR_BENCHMARK_APPROVED", "false").lower() == "true"
         )
@@ -204,6 +212,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             vector_approved=vector_approved,
             embedding_approval_sha256=approval_sha256,
         )
+        if rag_backend == "qdrant":
+            retrieval = QdrantGraphRetrieval(
+                GraphRepository(store._connect),
+                QdrantProjectionRepository(store._connect),
+                retrieval,
+                deployment_scope=(
+                    "production" if APP_ENV == "production" else "pilot"
+                ),
+                config=ProjectionConfig.from_env(),
+            )
     pipeline = AssistantEngine(knowledge, provider=provider, retrieval=retrieval)
     services = WebServices(
         store, storage, knowledge, trusted, auth, pipeline, TurnCoordinator(store)
@@ -304,8 +322,69 @@ def _delete_paths(storage: PrivateFileStorage, paths: list[str]) -> None:
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok", "service": "raise-web-api"}
+async def healthz(request: Request) -> dict[str, Any]:
+    from .migration_status import EXPECTED_DATABASE_REVISION
+
+    services = _services(request)
+    result: dict[str, Any] = {
+        "status": "ok",
+        "service": "raise-web-api",
+        "database_backend": "postgres" if services.store.is_postgres else "sqlite",
+        "expected_migration_revision": EXPECTED_DATABASE_REVISION,
+        "rag_backend": os.getenv("RAG_BACKEND", "postgres").strip().lower(),
+        "active_release_id": None,
+        "projection_status": "not_configured",
+        "qdrant_reachable": False,
+        "fallback_ready": True,
+        "local_model_available": False,
+    }
+    if not services.store.is_postgres:
+        result["migration_revision"] = "sqlite-development"
+        return result
+    try:
+        with services.store._connect() as connection:
+            revision = connection.execute(
+                "SELECT version_num FROM alembic_version"
+            ).fetchone()
+            active = connection.execute(
+                """
+                SELECT active.release_id, projection.state AS projection_state
+                FROM active_knowledge_releases active
+                LEFT JOIN knowledge_release_projections projection
+                  ON projection.release_id=active.release_id
+                 AND projection.target='qdrant'
+                WHERE active.deployment_scope=%s
+                """,
+                ("production" if APP_ENV == "production" else "pilot",),
+            ).fetchone()
+        result["migration_revision"] = revision["version_num"] if revision else None
+        result["active_release_id"] = active["release_id"] if active else None
+        result["projection_status"] = (
+            active.get("projection_state") if active else "missing"
+        )
+        result["fallback_ready"] = bool(active)
+    except Exception:
+        result["status"] = "degraded"
+        result["fallback_ready"] = False
+    qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6433").rstrip("/")
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        qdrant_check, ollama_check = await asyncio.gather(
+            client.get(f"{qdrant_url}/collections"),
+            client.get(f"{ollama_url}/api/tags"),
+            return_exceptions=True,
+        )
+    result["qdrant_reachable"] = (
+        isinstance(qdrant_check, httpx.Response) and qdrant_check.status_code == 200
+    )
+    result["local_model_available"] = (
+        isinstance(ollama_check, httpx.Response) and ollama_check.status_code == 200
+    )
+    if result["rag_backend"] == "qdrant" and not result["qdrant_reachable"]:
+        result["projection_status"] = "unreachable_fallback_ready"
+    return result
+
+
 
 
 @app.get("/v1/config")
@@ -314,22 +393,7 @@ async def public_config() -> dict[str, Any]:
         "app_name": APP_DISPLAY_NAME,
         "agreement_version": CONSENT_VERSION,
         "default_language": "ar",
-        "corpus_warning": (
-            None
-            if APP_ENV == "production"
-            else {
-                "en": (
-                    "Pilot answers may use an AI-drafted knowledge corpus that has "
-                    "not completed expert review. Review status appears in Sources; "
-                    "RAISE will limit or refer high-risk requests."
-                ),
-                "ar": (
-                    "قد تستخدم إجابات النسخة التجريبية قاعدة معرفة أعدّها الذكاء "
-                    "الاصطناعي ولم تكتمل مراجعتها من الخبراء. تظهر حالة المراجعة "
-                    "ضمن المصادر، ويحدّ RAISE الطلبات عالية المخاطر أو يحيلها."
-                ),
-            }
-        ),
+        "corpus_warning": None,
         "modes": [
             {
                 "id": key,
@@ -1235,3 +1299,337 @@ async def create_turn(
             )
 
     return _streaming_response(event_stream())
+
+
+class ReleaseActionBody(BaseModel):
+    deployment_scope: str = Field(default="pilot", pattern="^(internal|pilot|production)$")
+
+
+class EditorAssignmentBody(BaseModel):
+    user_id: str = Field(min_length=1, max_length=200)
+
+
+class ChangeProposalBody(BaseModel):
+    base_release_id: str = Field(min_length=1, max_length=200)
+    record_type: str = Field(pattern="^(document|claim|relation|translation)$")
+    record_id: str = Field(min_length=1, max_length=300)
+    operation: str = Field(pattern="^(create|update|retire)$")
+    patch: dict[str, Any]
+
+
+class ProposalReviewBody(BaseModel):
+    state: str = Field(pattern="^(accepted|rejected)$")
+    proposed_release_id: str | None = Field(default=None, max_length=200)
+    review_note: str | None = Field(default=None, max_length=2000)
+
+
+def _require_admin(user: CurrentUser) -> None:
+    if user.record.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required")
+
+
+def _require_postgres_store(services: WebServices) -> None:
+    if not services.store.is_postgres:
+        raise HTTPException(status_code=503, detail="Knowledge administration requires PostgreSQL")
+
+
+def _is_editor(services: WebServices, user: CurrentUser) -> bool:
+    if user.record.get("role") == "admin":
+        return True
+    with services.store._connect() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM knowledge_editors WHERE user_id=%s AND revoked_at IS NULL",
+            (user.id,),
+        ).fetchone()
+    return row is not None
+
+
+async def _activate_qdrant_aliases(
+    services: WebServices, release_id: str
+) -> dict[str, Any]:
+    from .qdrant_projection import ProjectionManifest, QdrantProjector
+
+    projection = await asyncio.to_thread(
+        QdrantProjectionRepository(services.store._connect).projection, release_id
+    )
+    if not projection or projection.get("state") != "ready":
+        raise HTTPException(status_code=409, detail="Release has no ready Qdrant projection")
+    manifest = ProjectionManifest(
+        release_id=release_id,
+        evidence_collection=str(projection["evidence_collection"]),
+        entity_collection=str(projection["entity_collection"]),
+        evidence_points=int(projection["evidence_points"]),
+        entity_points=int(projection["entity_points"]),
+        embedding_model=str(projection["embedding_model"]),
+        embedding_dimensions=int(projection["embedding_dimensions"]),
+        manifest_sha256=str(projection["manifest_sha256"]),
+    )
+    projector = QdrantProjector(
+        QdrantProjectionRepository(services.store._connect),
+        ProjectionConfig.from_env(),
+    )
+    try:
+        await projector.activate_aliases(manifest)
+    finally:
+        await projector.close()
+    return dict(projection)
+
+
+@app.get("/v1/admin/knowledge/releases")
+async def admin_list_releases(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    with services.store._connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT release.id, release.version, release.state,
+                   release.publication_scope, release.review_policy,
+                   release.embedding_model, release.embedding_dimensions,
+                   release.source_manifest_sha256, release.created_at,
+                   release.sealed_at, projection.state AS projection_state,
+                   projection.evidence_points, projection.entity_points,
+                   projection.manifest_sha256 AS projection_manifest_sha256,
+                   array_remove(array_agg(active.deployment_scope), NULL) AS active_scopes
+            FROM knowledge_releases release
+            LEFT JOIN knowledge_release_projections projection
+              ON projection.release_id=release.id AND projection.target='qdrant'
+            LEFT JOIN active_knowledge_releases active ON active.release_id=release.id
+            GROUP BY release.id, projection.state, projection.evidence_points,
+                     projection.entity_points, projection.manifest_sha256
+            ORDER BY release.created_at DESC
+            """
+        ).fetchall()
+    return {"releases": [dict(row) for row in rows]}
+
+
+@app.post("/v1/admin/knowledge/releases/{release_id}/activate")
+async def admin_activate_release(
+    release_id: str,
+    body: ReleaseActionBody,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    projection = await _activate_qdrant_aliases(services, release_id)
+    try:
+        result = await asyncio.to_thread(
+            GraphRepository(services.store._connect).activate_release,
+            body.deployment_scope,
+            release_id,
+            activated_by=user.id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "deployment_scope": result.deployment_scope,
+        "release_id": result.release_id,
+        "previous_release_id": result.previous_release_id,
+        "projection_manifest_sha256": projection["manifest_sha256"],
+    }
+
+
+@app.post("/v1/admin/knowledge/releases/rollback")
+async def admin_rollback_release(
+    body: ReleaseActionBody,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    with services.store._connect() as connection:
+        current = connection.execute(
+            "SELECT release_id FROM active_knowledge_releases WHERE deployment_scope=%s",
+            (body.deployment_scope,),
+        ).fetchone()
+        if not current:
+            raise HTTPException(status_code=409, detail="No active release to roll back")
+        target = connection.execute(
+            """
+            SELECT previous_release_id FROM knowledge_release_activations
+            WHERE deployment_scope=%s AND release_id=%s
+              AND previous_release_id IS NOT NULL
+            ORDER BY activated_at DESC LIMIT 1
+            """,
+            (body.deployment_scope, current["release_id"]),
+        ).fetchone()
+    if not target:
+        raise HTTPException(status_code=409, detail="No previous release is available")
+    target_id = str(target["previous_release_id"])
+    await _activate_qdrant_aliases(services, target_id)
+    try:
+        result = await asyncio.to_thread(
+            GraphRepository(services.store._connect).rollback_release,
+            body.deployment_scope,
+            activated_by=user.id,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "deployment_scope": result.deployment_scope,
+        "release_id": result.release_id,
+        "previous_release_id": result.previous_release_id,
+        "rolled_back": result.rolled_back,
+    }
+
+
+@app.get("/v1/admin/knowledge/neighborhood")
+async def admin_graph_neighborhood(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    query: str = Query(min_length=1, max_length=500),
+    hops: int = Query(default=1, ge=1, le=2),
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    repository = GraphRepository(services.store._connect)
+    release_id = await asyncio.to_thread(repository.active_release, "pilot")
+    if not release_id:
+        raise HTTPException(status_code=404, detail="No active pilot release")
+    entities = await asyncio.to_thread(
+        repository.resolve_entities, release_id=release_id, query=query, limit=20
+    )
+    paths = await asyncio.to_thread(
+        repository.graph_paths,
+        release_id=release_id,
+        entity_ids=tuple(str(row["id"]) for row in entities),
+        max_hops=hops,
+        review_statuses=("approved",),
+        limit=100,
+    )
+    return {"release_id": release_id, "entities": entities, "paths": paths}
+
+
+@app.post("/v1/admin/knowledge/editors")
+async def admin_assign_editor(
+    body: EditorAssignmentBody,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    with services.store._connect() as connection:
+        row = connection.execute("SELECT id FROM users WHERE id=%s", (body.user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        connection.execute(
+            """
+            INSERT INTO knowledge_editors(user_id, assigned_by)
+            VALUES (%s,%s)
+            ON CONFLICT(user_id) DO UPDATE SET assigned_by=excluded.assigned_by,
+                assigned_at=now(), revoked_at=NULL
+            """,
+            (body.user_id, user.id),
+        )
+    return {"user_id": body.user_id, "editor": True}
+
+
+@app.post("/v1/editor/knowledge/proposals")
+async def editor_create_proposal(
+    body: ChangeProposalBody,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    services = _services(request)
+    _require_postgres_store(services)
+    if not await asyncio.to_thread(_is_editor, services, user):
+        raise HTTPException(status_code=403, detail="Editor access required")
+    proposal_id = f"proposal_{uuid.uuid4().hex}"
+    with services.store._connect() as connection:
+        base = connection.execute(
+            "SELECT id FROM knowledge_releases WHERE id=%s",
+            (body.base_release_id,),
+        ).fetchone()
+        if not base:
+            raise HTTPException(status_code=404, detail="Base release not found")
+        connection.execute(
+            """
+            INSERT INTO knowledge_change_proposals(
+                id,base_release_id,editor_user_id,record_type,record_id,
+                operation,patch_json
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)
+            """,
+            (
+                proposal_id,
+                body.base_release_id,
+                user.id,
+                body.record_type,
+                body.record_id,
+                body.operation,
+                json.dumps(body.patch, ensure_ascii=False),
+            ),
+        )
+    return {"proposal_id": proposal_id, "state": "proposed"}
+
+
+@app.get("/v1/editor/knowledge/proposals")
+async def editor_list_proposals(
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    state: str | None = Query(default=None, pattern="^(proposed|accepted|rejected|superseded)$"),
+) -> dict[str, Any]:
+    services = _services(request)
+    _require_postgres_store(services)
+    if not await asyncio.to_thread(_is_editor, services, user):
+        raise HTTPException(status_code=403, detail="Editor access required")
+    with services.store._connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM knowledge_change_proposals WHERE (%s IS NULL OR state=%s) ORDER BY created_at DESC LIMIT 500",
+            (state, state),
+        ).fetchall()
+    return {"proposals": [dict(row) for row in rows]}
+
+
+@app.post("/v1/admin/knowledge/proposals/{proposal_id}/review")
+async def admin_review_proposal(
+    proposal_id: str,
+    body: ProposalReviewBody,
+    request: Request,
+    user: Annotated[CurrentUser, Depends(current_user)],
+) -> dict[str, Any]:
+    _require_admin(user)
+    services = _services(request)
+    _require_postgres_store(services)
+    if body.state == "accepted" and not body.proposed_release_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Accepted changes must reference a separately built immutable release",
+        )
+    with services.store._connect() as connection:
+        if body.proposed_release_id:
+            release = connection.execute(
+                "SELECT state FROM knowledge_releases WHERE id=%s",
+                (body.proposed_release_id,),
+            ).fetchone()
+            if not release or release["state"] != "ready":
+                raise HTTPException(
+                    status_code=409, detail="Proposed release is not ready"
+                )
+        cursor = connection.execute(
+            """
+            UPDATE knowledge_change_proposals
+            SET state=%s, proposed_release_id=%s, reviewer_user_id=%s,
+                review_note=%s, reviewed_at=now()
+            WHERE id=%s AND state='proposed'
+            """,
+            (
+                body.state,
+                body.proposed_release_id,
+                user.id,
+                body.review_note,
+                proposal_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(
+                status_code=409, detail="Proposal is not reviewable"
+            )
+    return {"proposal_id": proposal_id, "state": body.state}

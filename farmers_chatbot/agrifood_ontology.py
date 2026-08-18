@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from .agrifood_ontology_v03_data import V03_ENTITIES, V03_RELATIONS
 from .graph_ingestion import (
     ENTITY_TYPES,
     RELATION_TYPES,
@@ -17,9 +18,9 @@ from .graph_ingestion import (
     normalize_search_text,
 )
 
-ONTOLOGY_VERSION = "raise-agrifood-ontology-v0.2.0"
-ONTOLOGY_MIN_ENTITIES = 120
-ONTOLOGY_MIN_RELATIONS = 140
+ONTOLOGY_VERSION = "raise-agrifood-ontology-v0.3.0"
+ONTOLOGY_MIN_ENTITIES = 250
+ONTOLOGY_MIN_RELATIONS = 450
 
 S = "kb-scope-local-context"
 C = "kb-crop-production"
@@ -278,6 +279,18 @@ ENTITIES: tuple[OntologyEntity, ...] = (
 )
 
 
+ENTITIES += tuple(
+    _e(
+        key,
+        entity_type,
+        label_en,
+        label_ar,
+        record_ids,
+        _a(*aliases),
+    )
+    for key, entity_type, label_en, label_ar, record_ids, aliases in V03_ENTITIES
+)
+
 def _r(
     record_id: str,
     subject: str,
@@ -483,6 +496,19 @@ RELATIONS: tuple[OntologyRelation, ...] = (
     _r(DY, "food_licensing", "requires_live_source", "competent_authority", risk="high"),
     _r(DY, "stale_information", "conflicts_with", "alert_window"),
     _r(DY, "organic_standard", "requires_live_source", "competent_authority"),
+)
+
+
+RELATIONS += tuple(
+    OntologyRelation(
+        record_id=record_id,
+        subject=subject,
+        predicate=predicate,
+        object=object_,
+        risk=risk,
+        qualifiers=qualifiers,
+    )
+    for record_id, subject, predicate, object_, risk, qualifiers in V03_RELATIONS
 )
 
 

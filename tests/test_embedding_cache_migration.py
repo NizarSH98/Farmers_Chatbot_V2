@@ -24,7 +24,8 @@ def _migration():
 
 def test_embedding_cache_is_the_expected_linear_head() -> None:
     module, _ = _migration()
-    assert module.revision == EXPECTED_DATABASE_REVISION == "20260812_0004"
+    assert module.revision == "20260812_0004"
+    assert EXPECTED_DATABASE_REVISION == "20260812_0005"
     assert module.down_revision == "20260811_0003"
 
 

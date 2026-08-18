@@ -50,6 +50,11 @@ snapshots/
 *.sql.gz
 *.snapshot
 
+# Rebuildable local model/build artifacts and signed reports.
+model-cache/
+build-cache/
+build-reports/
+
 
 # Raw source intake is reviewed locally before approved claims are promoted.
 knowledge_base/incoming/

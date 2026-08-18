@@ -36,6 +36,8 @@ class RetrievalRequest:
     currentness: str = "stable"
     top_k: int = 6
     graph_hops: int = 1
+    route_override: str | None = None
+    release_pin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,10 @@ class EvidenceBundle:
     retrieval_metrics: dict[str, Any] = field(default_factory=dict)
     knowledge_results: list[SearchResult] = field(default_factory=list)
     project_results: list[ProjectSearchResult] = field(default_factory=list)
+    release_id: str | None = None
+    retrieval_route: str | None = None
+    ranking_channels: list[str] = field(default_factory=list)
+    projection_status: str | None = None
 
 
 class RetrievalService:

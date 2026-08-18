@@ -132,8 +132,14 @@ def parse_knowledge_markdown(path: str | Path) -> MarkdownCorpus:
 
 
 def validate_corpus(corpus: MarkdownCorpus) -> None:
-    if corpus.front_matter["ontology_version"] != ONTOLOGY_VERSION:
-        raise KnowledgeMarkdownError("corpus ontology version is not supported")
+    version = str(corpus.front_matter["version"])
+    if version not in {"0.2", "0.3"}:
+        raise KnowledgeMarkdownError("corpus version is not supported")
+    is_v03 = version == "0.3"
+    if is_v03 and corpus.front_matter["ontology_version"] != ONTOLOGY_VERSION:
+        raise KnowledgeMarkdownError("v0.3 corpus ontology version is not supported")
+    if not is_v03 and not str(corpus.front_matter["ontology_version"]).startswith("raise-agrifood-ontology-v0.2"):
+        raise KnowledgeMarkdownError("historical v0.2 ontology version is not supported")
     ids = [str(record.metadata["id"]) for record in corpus.records]
     if not ids or len(ids) != len(set(ids)):
         raise KnowledgeMarkdownError("record IDs must be non-empty and unique")
@@ -143,14 +149,23 @@ def validate_corpus(corpus: MarkdownCorpus) -> None:
     duplicates = 0
     for record in corpus.records:
         meta = record.metadata
-        expected_ontology = ontology_for_record(str(meta["id"]))
-        for key in ("ontology_version", "ontology_entities", "ontology_relations"):
-            if meta[key] != expected_ontology[key]:
-                raise KnowledgeMarkdownError(
-                    f"{meta['id']} embedded ontology differs from the versioned spec"
-                )
-        if meta["review_status"] != "ai_draft" or meta["translation_status"] != "machine_draft":
-            raise KnowledgeMarkdownError(f"{meta['id']} is not an AI/machine draft")
+        if is_v03:
+            expected_ontology = ontology_for_record(str(meta["id"]))
+            for key in ("ontology_version", "ontology_entities", "ontology_relations"):
+                if meta[key] != expected_ontology[key]:
+                    raise KnowledgeMarkdownError(
+                        f"{meta['id']} embedded ontology differs from the versioned spec"
+                    )
+            if meta["review_status"] != "approved":
+                raise KnowledgeMarkdownError(f"{meta['id']} is not pilot-approved")
+            if meta.get("approval_authority") != "project_owner":
+                raise KnowledgeMarkdownError(f"{meta['id']} lacks project-owner approval")
+            if meta.get("expert_verification_status") != "pending":
+                raise KnowledgeMarkdownError(f"{meta['id']} expert status is invalid")
+        elif meta["review_status"] != "ai_draft":
+            raise KnowledgeMarkdownError(f"{meta['id']} historical review status is invalid")
+        if meta["translation_status"] != "machine_draft":
+            raise KnowledgeMarkdownError(f"{meta['id']} translation status is invalid")
         if meta["production_eligible"] is not False or meta["publication_scope"] != "pilot":
             raise KnowledgeMarkdownError(f"{meta['id']} violates the pilot publication policy")
         if not meta["retrieval_enabled"]:

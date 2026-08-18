@@ -1,0 +1,23 @@
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:55433:5432"
+
+  qdrant:
+    ports: !override
+      - "127.0.0.1:6434:6333"
+
+  api:
+    environment:
+      APP_PUBLIC_URL: http://localhost:3001
+      WEB_ALLOWED_ORIGINS: http://localhost:3001
+    ports: !override
+      - "127.0.0.1:8001:8000"
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8001
+        NEXT_PUBLIC_LOCAL_AUTH: "true"
+    ports: !override
+      - "127.0.0.1:3001:3000"

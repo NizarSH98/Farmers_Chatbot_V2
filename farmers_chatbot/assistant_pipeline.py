@@ -156,6 +156,9 @@ class AssistantEngine:
 
     async def close(self) -> None:
         await self.provider.close()
+        close_retrieval = getattr(self.retrieval, "close", None)
+        if close_retrieval is not None:
+            await close_retrieval()
 
     async def prepare(
         self,

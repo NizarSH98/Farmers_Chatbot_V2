@@ -82,7 +82,7 @@ def test_docx_conversion_is_offline_bilingual_and_graph_ready(
     assert len(corpus.records) == len(SPECS)
     assert len(corpus.sources) == 35
     assert all(
-        record.metadata["translation_method"] == "local_repository_ai_draft"
+        record.metadata["translation_method"] == "local_opus_mt_with_reviewed_overrides_and_semantic_validation"
         for record in corpus.records
     )
     legacy_ids = {
@@ -102,11 +102,11 @@ def test_docx_conversion_is_offline_bilingual_and_graph_ready(
     assert len(batch.documents) == len(SPECS) * 2
     assert len(batch.entities) == len(ENTITIES)
     assert len(batch.relations) == len(RELATIONS)
-    assert all(item.review_status == "ai_draft" for item in batch.claims)
+    assert all(item.review_status == "approved" for item in batch.claims)
 
     arabic = arabic_output.read_text(encoding="utf-8")
     assert arabic.count("\n## ") == len(SPECS)
-    assert "translation_method: local_repository_ai_draft" in arabic
+    assert "translation_method: local_opus_mt_with_reviewed_overrides_and_semantic_validation" in arabic
     assert "OpenRouter" not in arabic
     assert "\ufffd" not in arabic
     assert all(f'"id": "{spec.record_id}"' in arabic for spec in SPECS)

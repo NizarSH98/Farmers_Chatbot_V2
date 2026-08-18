@@ -527,27 +527,27 @@ class GraphRepository:
         row = connection.execute(
             """
             SELECT
-                (SELECT count(*) FROM graph_sources WHERE release_id = %s),
-                (SELECT count(*) FROM graph_documents WHERE release_id = %s),
-                (SELECT count(*) FROM graph_chunks WHERE release_id = %s),
+                (SELECT count(*) FROM graph_sources WHERE release_id = %s) AS sources,
+                (SELECT count(*) FROM graph_documents WHERE release_id = %s) AS documents,
+                (SELECT count(*) FROM graph_chunks WHERE release_id = %s) AS chunks,
                 (SELECT count(*) FROM graph_ingestion_runs
-                    WHERE release_id = %s AND state = 'running'),
+                    WHERE release_id = %s AND state = 'running') AS running_runs,
                 (SELECT count(*) FROM graph_ingestion_runs
-                    WHERE release_id = %s AND state = 'failed'),
+                    WHERE release_id = %s AND state = 'failed') AS failed_runs,
                 (SELECT count(*) FROM graph_ingestion_runs
-                    WHERE release_id = %s AND state = 'completed'),
+                    WHERE release_id = %s AND state = 'completed') AS completed_runs,
                 (SELECT count(*) FROM graph_claims claim
                     WHERE claim.release_id = %s AND NOT EXISTS (
                         SELECT 1 FROM graph_evidence_links evidence
                         WHERE evidence.release_id = claim.release_id
                           AND evidence.claim_id = claim.id
-                    )),
+                    )) AS claims_without_evidence,
                 (SELECT count(*) FROM graph_relations relation
                     WHERE relation.release_id = %s AND NOT EXISTS (
                         SELECT 1 FROM graph_evidence_links evidence
                         WHERE evidence.release_id = relation.release_id
                           AND evidence.relation_id = relation.id
-                    ))
+                    )) AS relations_without_evidence
             """,
             (release_id,) * 8,
         ).fetchone()
@@ -755,7 +755,7 @@ class GraphRepository:
     ) -> int:
         """Persist derived vectors idempotently for later release rebuilds."""
 
-        if dimensions not in {768, 1536}:
+        if dimensions not in {384, 768, 1024, 1536}:
             raise GraphIntegrityError("unsupported embedding cache dimension")
         if input_type not in {"search_document", "search_query"}:
             raise GraphIntegrityError("unsupported embedding input type")
@@ -942,7 +942,13 @@ class GraphRepository:
                          paths.depth, paths.frontier_entity, paths.entity_path,
                          subject.label_en,
                          subject.label_ar, object.label_en, object.label_ar
-                ORDER BY paths.depth, paths.id
+                ORDER BY
+                    CASE
+                      WHEN paths.subject_entity_id = ANY(%s::text[])
+                       AND paths.object_entity_id = ANY(%s::text[]) THEN 0
+                      ELSE 1
+                    END,
+                    paths.depth, paths.id
                 LIMIT %s
                 """,
                 (
@@ -957,6 +963,8 @@ class GraphRepository:
                     release_id,
                     release_id,
                     release_id,
+                    list(entity_ids),
+                    list(entity_ids),
                     max(1, min(int(limit), 100)),
                 ),
             ).fetchall()

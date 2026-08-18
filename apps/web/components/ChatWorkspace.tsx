@@ -62,6 +62,8 @@ import type {
   UsageSummary
 } from "@/lib/types";
 
+const LOCAL_AUTH = process.env.NEXT_PUBLIC_LOCAL_AUTH === "true";
+
 type DialogState =
   | { kind: "rename"; conversation: Conversation }
   | { kind: "delete"; conversation: Conversation }
@@ -77,7 +79,11 @@ const initialConfig: AppConfig = {
 };
 
 export function ChatWorkspace() {
-  const [language, setLanguage] = useState<Language>("ar");
+  const [language, setLanguage] = useState<Language>(() => {
+    if (typeof window === "undefined") return "ar";
+    const saved = localStorage.getItem("raise-language");
+    return saved === "en" || saved === "ar" ? saved : "ar";
+  });
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<CurrentUser | null>(null);
   const [config, setConfig] = useState<AppConfig>(initialConfig);
@@ -88,7 +94,7 @@ export function ChatWorkspace() {
   const [mode, setMode] = useState("standard");
   const [modelId, setModelId] = useState("");
   const [clarificationStyle, setClarificationStyle] = useState("auto");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!LOCAL_AUTH);
   const [sending, setSending] = useState(false);
   const [statusStage, setStatusStage] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -121,7 +127,7 @@ export function ChatWorkspace() {
   const documentRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const token = session?.access_token || "";
+  const token = LOCAL_AUTH ? "local-development" : session?.access_token || "";
   const rtl = language === "ar";
   const text = useCallback(
     (key: Parameters<typeof t>[1]) => t(language, key),
@@ -129,10 +135,12 @@ export function ChatWorkspace() {
   );
 
   useEffect(() => {
+    if (LOCAL_AUTH) {
+      return;
+    }
+
     const supabase = supabaseBrowser();
     supabase.auth.getSession().then(({ data }) => {
-      const saved = localStorage.getItem("raise-language");
-      if (saved === "en" || saved === "ar") setLanguage(saved);
       setSession(data.session);
       setLoading(false);
     });
@@ -263,6 +271,7 @@ export function ChatWorkspace() {
 
   const signOut = async () => {
     abortRef.current?.abort();
+    if (LOCAL_AUTH) return;
     await supabaseBrowser().auth.signOut();
   };
 
@@ -755,7 +764,7 @@ export function ChatWorkspace() {
     );
   }
 
-  if (!session) {
+  if (!session && !LOCAL_AUTH) {
     return (
       <main className="auth-page" dir={rtl ? "rtl" : "ltr"}>
         <button

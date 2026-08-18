@@ -32,9 +32,10 @@ from .graph_ingestion import (
     validate_batch,
 )
 from .knowledge_markdown import MarkdownRecord, parse_knowledge_markdown
+from .retrieval_versions import PROJECTION_TEXT_VERSION
 
-PARSER_VERSION = "raise-markdown-v0.2-parser-2"
-COMPILED_SOURCE_ID = "RAISE-AGRIFOOD-DRAFT-V0.2"
+PARSER_VERSION = "raise-markdown-v0.3-parser-1"
+COMPILED_SOURCE_ID = "RAISE-AGRIFOOD-APPROVED-V0.3"
 
 
 def _source(item: dict[str, object]) -> SourceRecord:
@@ -90,11 +91,12 @@ def build_release_batch(
         "parser_version": PARSER_VERSION,
         "ontology_version": ONTOLOGY_VERSION,
         "ontology_sha256": ontology_fingerprint(),
+        "projection_text_version": PROJECTION_TEXT_VERSION,
         "embedding_approval": embedding_approval,
     }
     release = make_release_spec(
         version=str(corpus.front_matter["version"]), publication_scope="pilot",
-        review_policy="draft_allowed", embedding_model=embedding_model,
+        review_policy="approved_only", embedding_model=embedding_model,
         embedding_dimensions=embedding_dimensions, source_manifest=manifest,
         metadata={
             "document_id": corpus.front_matter["document_id"],
@@ -106,10 +108,10 @@ def build_release_batch(
     sources = [_source(item) for item in corpus.sources.values()]
     sources.append(SourceRecord(
         id=COMPILED_SOURCE_ID, source_key=COMPILED_SOURCE_ID,
-        title="RAISE Agrifood Knowledge Draft v0.2", publisher="RAISE project",
-        source_kind="compiled_ai_draft", evidence_class="draft_synthesis",
+        title="RAISE Agrifood Knowledge v0.3", publisher="RAISE project",
+        source_kind="compiled_pilot_approved", evidence_class="project_owner_approved_synthesis",
         content_hash=manifest["markdown_sha256"],
-        metadata={"production_eligible": False, "source_ids": sorted(corpus.sources)},
+        metadata={"production_eligible": False, "approval_authority": "project_owner", "expert_verification_status": "pending", "source_ids": sorted(corpus.sources)},
     ))
     entities: list[EntityRecord] = []
     aliases: list[AliasRecord] = []
@@ -154,7 +156,7 @@ def build_release_batch(
             documents.append(DocumentRecord(
                 id=document_id, source_id=COMPILED_SOURCE_ID,
                 title=str(record.metadata[f"title_{language}"]), language=language,
-                content_hash=content_sha256(joined), review_status="ai_draft",
+                content_hash=content_sha256(joined), review_status="approved",
                 translation_status="source" if language == "en" else "machine_draft",
                 retrieval_enabled=True,
                 geography=tuple(str(item) for item in record.metadata["geography"]),
@@ -163,7 +165,7 @@ def build_release_batch(
             made = chunk_semantic_sections(
                 release=release, source_id=COMPILED_SOURCE_ID, document_id=document_id,
                 document_title=str(record.metadata[f"title_{language}"]), language=language,
-                review_status="ai_draft", risk=str(record.metadata["risk"]),
+                review_status="approved", risk=str(record.metadata["risk"]),
                 sections=sections,
                 geography=tuple(str(item) for item in record.metadata["geography"]),
             )
@@ -171,7 +173,7 @@ def build_release_batch(
             chunks_by_record_language[(record_id, language)] = made
             for chunk in made:
                 claim = make_claim(
-                    chunk.content, language, "ai_draft", risk=str(record.metadata["risk"]),
+                    chunk.content, language, "approved", risk=str(record.metadata["risk"]),
                     dynamicity="stable", geography=tuple(str(item) for item in record.metadata["geography"]),
                     metadata={"record_id": record_id, "declared_dynamicity": record.metadata["dynamicity"]},
                 )
@@ -210,7 +212,7 @@ def build_release_batch(
             polarity=specification.polarity,
             qualifiers=qualifiers,
             risk=specification.risk,
-            review_status="ai_draft",
+            review_status="approved",
             geography=tuple(str(item) for item in record.metadata["geography"]),
             metadata={
                 "record_id": specification.record_id,
@@ -230,7 +232,7 @@ def build_release_batch(
                 confidence=0.75,
                 metadata={
                     "source_ids": record.metadata["source_ids"],
-                    "curation_status": "ai_draft",
+                    "curation_status": "project_owner_approved",
                     "ontology_version": ONTOLOGY_VERSION,
                 },
             )

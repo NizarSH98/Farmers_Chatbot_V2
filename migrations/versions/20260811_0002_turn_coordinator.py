@@ -42,7 +42,7 @@ def upgrade() -> None:
         UPDATE query_events
         SET query_status = CASE
             WHEN duration_ms IS NULL THEN 'reserved'
-            WHEN success THEN 'completed'
+            WHEN COALESCE(success::text, '') IN ('1', 'true', 't') THEN 'completed'
             ELSE 'failed'
         END;
 

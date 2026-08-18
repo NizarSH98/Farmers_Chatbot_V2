@@ -35,7 +35,7 @@ except ModuleNotFoundError:  # direct script entry point
     )
 
 SOURCE_SHA256 = "3C0BAF8145E4A2E287BA5783F8AB26A7CEAE1C5340322C1EE065887CC9B75B0E"
-GENERATED_AT = "2026-08-11T00:00:00+00:00"
+GENERATED_AT = "2026-08-12T00:00:00+00:00"
 SOURCE_RE = re.compile(r"\[(S\d{2})\]\s*(.*)")
 CHAPTER_RE = re.compile(r"Chapter\s+(\d+)\s+[—-]\s+(.+)", re.IGNORECASE)
 SECTION_RE = re.compile(r"^([A-M])\.\s*(.+)")
@@ -317,6 +317,34 @@ def apply_local_arabic_drafts(
         }
 
 
+def apply_translation_asset(records: list[DraftRecord], path: Path) -> None:
+    """Apply a complete, cached local-model translation asset when present."""
+
+    if not path.is_file():
+        return
+    asset = json.loads(path.read_text(encoding="utf-8"))
+    if asset.get("schema_version") not in {
+        "raise-agrifood-arabic-v0.3-translation-v1",
+        "raise-agrifood-arabic-v0.3-opus-mt-v2",
+    }:
+        raise ValueError("unsupported local translation asset")
+    translations = asset.get("translations") or {}
+    expected_ids = {record.spec.record_id for record in records}
+    if set(translations) != expected_ids:
+        raise ValueError("local translation asset record IDs differ from the corpus")
+    required = {
+        "title_ar", "guidance_ar", "decision_logic_ar", "safe_next_action_ar",
+        "avoid_escalate_ar", "applicability_limits_ar",
+    }
+    for record in records:
+        translated = translations[record.spec.record_id]
+        if set(translated) != required or any(
+            not str(translated[key]).strip() for key in required
+        ):
+            raise ValueError(f"incomplete local translation for {record.spec.record_id}")
+        record.translation = {key: str(value).strip() for key, value in translated.items()}
+
+
 def doc_sources(path: Path) -> dict[str, dict[str, Any]]:
     result = {}
     for paragraph in Document(path).paragraphs:
@@ -357,11 +385,14 @@ def metadata(record: DraftRecord) -> dict[str, Any]:
         "entities": ontology["ontology_entities"],
         "graph_relations": [{"type": relation, "target": target} for relation, target in spec.relations],
         **ontology,
-        "risk": spec.risk, "evidence_class": "official_and_draft_synthesis",
+        "risk": spec.risk, "evidence_class": "official_and_project_synthesis",
         "claim_ids": [f"claim:{spec.record_id}:guidance", f"claim:{spec.record_id}:decision", f"claim:{spec.record_id}:safety"],
-        "source_ids": list(record.source_ids), "review_status": "ai_draft",
+        "source_ids": list(record.source_ids), "review_status": "approved",
+        "approval_authority": "project_owner",
+        "expert_verification_status": "pending",
         "translation_status": "machine_draft", "dynamicity": spec.dynamicity,
-        "translation_method": "local_repository_ai_draft",
+        "translation_method": "local_opus_mt_with_reviewed_overrides_and_semantic_validation",
+        "approval_effective_from": "2026-08-12",
         "effective_from": None, "expires_at": None, "review_by": "2026-11-11",
         "owner_role": "knowledge_steward",
         "reviewer_roles": ["domain_expert", "Arabic_reviewer", "field_reviewer"],
@@ -370,17 +401,69 @@ def metadata(record: DraftRecord) -> dict[str, Any]:
     }
 
 
-def render_markdown(records: list[DraftRecord], sources: dict[str, dict[str, Any]], source_name: str) -> str:
+CHAPTER_EXCLUSIONS: dict[int, tuple[str, str]] = {
+    1: ("product_documentation", "Product purpose belongs in product documentation."),
+    2: ("product_documentation", "User-experience requirements belong in product documentation and evaluation."),
+    5: ("removed_scaffolding", "Unmeasured product-differentiation claims are not farmer knowledge."),
+    6: ("non_retrieval_governance", "Source-authority rules are enforced by ingestion and retained in the appendix."),
+    9: ("removed_unverified_claims", "Institutional service claims require an approved supporting passage."),
+    10: ("removed_unverified_claims", "Institutional project outcomes require an approved supporting passage."),
+    24: ("removed_unverified_claims", "Institution-specific case claims require passage-level and institutional review."),
+    29: ("non_retrieval_provenance", "Provenance records are consolidated in the non-retrievable source register."),
+    30: ("non_retrieval_validation", "Knowledge gaps are retained as an editorial backlog, not farmer guidance."),
+    31: ("moved_to_evaluation", "Benchmark prompts and answers are excluded from retrieval."),
+    32: ("non_retrieval_governance", "Approval and change history belongs in editor and release metadata."),
+}
+
+
+def build_chapter_disposition(
+    chapters: dict[int, dict[str, list[str]]],
+) -> list[dict[str, Any]]:
+    """Account for every numbered source chapter without indexing scaffolding."""
+
+    if set(chapters) != set(range(1, 33)):
+        raise ValueError("The source must contain exactly chapters 1 through 32")
+    result: list[dict[str, Any]] = []
+    for chapter in range(1, 33):
+        target_ids = [spec.record_id for spec in SPECS if chapter in spec.chapters]
+        retained_blocks = sum(len(items) for items in chapters[chapter].values())
+        if target_ids:
+            disposition = "retained" if len(target_ids) == 1 else "merged"
+            reason = "Substantive guidance is mapped to the listed knowledge record IDs."
+        else:
+            disposition, reason = CHAPTER_EXCLUSIONS[chapter]
+        result.append(
+            {
+                "chapter": chapter,
+                "disposition": disposition,
+                "knowledge_ids": target_ids,
+                "retained_body_blocks": retained_blocks if target_ids else 0,
+                "reason": reason,
+            }
+        )
+    return result
+
+
+def render_markdown(
+    records: list[DraftRecord],
+    sources: dict[str, dict[str, Any]],
+    source_name: str,
+    chapter_disposition: list[dict[str, Any]] | None = None,
+) -> str:
+    if chapter_disposition is None:
+        chapter_disposition = build_chapter_disposition(
+            {chapter: {} for chapter in range(1, 33)}
+        )
     lines = [
-        "---", "document_id: raise-agrifood-knowledge", 'version: "0.2"',
-        "status: ai_draft", "publication_scope: pilot", "production_eligible: false",
+        "---", "document_id: raise-agrifood-knowledge", 'version: "0.3"',
+        "status: approved", "publication_scope: pilot", "production_eligible: false",
         f"source_doc_sha256: {SOURCE_SHA256}", f"generated_at: {GENERATED_AT}",
         "languages: [en, ar]", "scope: [Akkar, rural Lebanon]",
-        "default_review_status: ai_draft", "default_translation_status: machine_draft",
-        "translation_method: local_repository_ai_draft",
+        "default_review_status: approved", "default_translation_status: machine_draft",
+        "approval_authority: project_owner", "expert_verification_status: pending",
         "default_retrieval_enabled: true", f"ontology_version: {ONTOLOGY_VERSION}",
-        "---", "", "# RAISE Agrifood Knowledge Draft", "",
-        "> Pilot draft: English is the authoritative draft source. Arabic was drafted locally in the repository without an external translation service. Neither language is production-approved; high-risk details remain limited or referral-only until expert review.", "",
+        "---", "", "# RAISE Agrifood Knowledge v0.3", "",
+        "> Approved by the project owner for authenticated pilot use. Expert verification remains visible to editors in administrative metadata; safety and live-source rules still apply.", "",
     ]
     for record in records:
         lines.extend([
@@ -403,27 +486,17 @@ def render_markdown(records: list[DraftRecord], sources: dict[str, dict[str, Any
             lines.append(f"- [{source_id}] {source.get('title', source_id)} — {source.get('url') or 'URL unresolved; validation required'}")
         lines.append("")
 
-    retained = sorted({chapter for spec in SPECS for chapter in spec.chapters})
     legacy_owners = {
         legacy_id: record.spec.record_id
         for record in records
         for legacy_id in record.supersedes
     }
     mapping = {
-        "retained_and_merged": {str(chapter): [spec.record_id for spec in SPECS if chapter in spec.chapters] for chapter in retained},
-        "excluded_from_retrieval": {
-            "1-2": "product purpose and interface material belongs in product documentation",
-            "5": "unmeasured product differentiation claim",
-            "6": "source authority rules consolidated in this appendix and ingestion validation",
-            "9-10": "institutional service and outcome claims pending institutional approval",
-            "24": "institution-specific case claims pending passage and institutional review",
-            "29-30": "provenance rules and gaps consolidated in this appendix",
-            "31": "benchmark material moved to evaluation fixtures",
-            "32": "governance and change control belongs in operational documentation",
-            "appendices": "review registers, prompts, dashboards, and readiness checklists are non-retrievable",
-        },
+        "chapter_disposition": chapter_disposition,
+        "appendix_disposition": "Review registers, prompts, dashboards, and readiness checklists are non-retrievable.",
         "legacy_json_merge_owners": dict(sorted(legacy_owners.items())),
         "legacy_json_excluded": LEGACY_JSON_EXCLUSIONS,
+        "source_doc_sha256": SOURCE_SHA256,
     }
     source_register = []
     for source_id in sorted(sources):
@@ -469,8 +542,8 @@ def render_arabic_companion(
     lines = [
         "---",
         "document_id: raise-agrifood-knowledge-ar",
-        'version: "0.2"',
-        "status: ai_draft",
+        'version: "0.3"',
+        "status: approved",
         "publication_scope: pilot",
         "production_eligible: false",
         f"source_doc_sha256: {SOURCE_SHA256}",
@@ -479,18 +552,15 @@ def render_arabic_companion(
         "scope: [Akkar, rural Lebanon]",
         f"canonical_companion: {canonical_name}",
         "translation_status: machine_draft",
-        "translation_method: local_repository_ai_draft",
+        "translation_method: local_opus_mt_with_reviewed_overrides_and_semantic_validation",
+        "approval_authority: project_owner",
+        "expert_verification_status: pending",
         f"ontology_version: {ONTOLOGY_VERSION}",
         "---",
         "",
-        "# مسودة RAISE للمعرفة الزراعية والغذائية",
+        "# قاعدة RAISE للمعرفة الزراعية والغذائية — الإصدار 0.3",
         "",
-        (
-            "> هذه نسخة عربية تجريبية أُعدّت محلياً داخل المستودع من دون "
-            "إرسال نص الوثيقة إلى خدمة ترجمة خارجية. تبقى الإنجليزية في "
-            "الملف الأساسي هي المسودة المرجعية إلى حين المراجعة الزراعية "
-            "واللغوية والميدانية."
-        ),
+        "> معتمد من مالك المشروع للاستخدام التجريبي الموثق. تبقى حالة التحقق الخبير ضمن بيانات المحررين، وتظل قواعد السلامة والمصادر الحية إلزامية.",
         "",
     ]
     for record in records:
@@ -631,8 +701,8 @@ def validate_arabic_companion(
             raise ValueError("Arabic companion has a non-Arabic record view")
         if item.get("production_eligible") is not False:
             raise ValueError("Arabic companion record is production eligible")
-        if item.get("review_status") != "ai_draft":
-            raise ValueError("Arabic companion record is not an AI draft")
+        if item.get("review_status") != "approved":
+            raise ValueError("Arabic companion record is not pilot-approved")
         if set(item.get("source_ids") or []) - set(sources):
             raise ValueError(f"Arabic sources are unresolved for {item['id']}")
         for relation in item.get("graph_relations") or []:
@@ -694,8 +764,18 @@ def run(args: argparse.Namespace) -> None:
     chapters, chapter_sources = extract_chapters(args.input)
     records = build_records(chapters, chapter_sources, args.guide)
     apply_local_arabic_drafts(records, args.guide)
+    apply_translation_asset(
+        records,
+        getattr(args, "translation_asset", Path("knowledge_base/agrifood_translations_v0.3.json")),
+    )
     sources = reconcile_sources(args.input, args.sources)
-    text = render_markdown(records, sources, args.input.name)
+    disposition = build_chapter_disposition(chapters)
+    text = render_markdown(
+        records,
+        sources,
+        args.input.name,
+        disposition,
+    )
     validate_output(text, records, sources)
     arabic_text = render_arabic_companion(
         records,
@@ -705,6 +785,23 @@ def run(args: argparse.Namespace) -> None:
     )
     validate_arabic_companion(arabic_text, records, sources)
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    disposition_output = getattr(
+        args,
+        "disposition_output",
+        args.output.with_name(f"{args.output.stem}.disposition.json"),
+    )
+    disposition_output.parent.mkdir(parents=True, exist_ok=True)
+    disposition_output.write_text(
+        json.dumps(
+            {
+                "source_doc_sha256": checksum,
+                "chapters": disposition,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
     args.output.write_text(text, encoding="utf-8", newline="\n")
     args.arabic_output.write_text(
         arabic_text,
@@ -716,10 +813,11 @@ def run(args: argparse.Namespace) -> None:
     print(json.dumps({
         "output": str(args.output),
         "arabic_output": str(args.arabic_output),
+        "disposition_output": str(disposition_output),
         "records": len(records),
         "sources": len(sources),
         "source_sha256": checksum,
-        "translation_method": "local_repository_ai_draft",
+        "translation_method": "local_opus_mt_with_reviewed_overrides_and_semantic_validation",
         "external_translation_calls": 0,
     }, ensure_ascii=False))
 
@@ -727,8 +825,18 @@ def run(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, default=Path("knowledge_base/ESDU_Agrifood_Knowledge_Base_v0.1.docx"))
-    parser.add_argument("--output", type=Path, default=Path("knowledge_base/agrifood_knowledge_draft_v0.2.md"))
-    parser.add_argument("--arabic-output", type=Path, default=Path("knowledge_base/agrifood_knowledge_draft_v0.2_ar.md"))
+    parser.add_argument("--output", type=Path, default=Path("knowledge_base/agrifood_knowledge_v0.3.en.md"))
+    parser.add_argument("--arabic-output", type=Path, default=Path("knowledge_base/agrifood_knowledge_v0.3.ar.md"))
+    parser.add_argument(
+        "--disposition-output",
+        type=Path,
+        default=Path("knowledge_base/agrifood_knowledge_v0.3.disposition.json"),
+    )
+    parser.add_argument(
+        "--translation-asset",
+        type=Path,
+        default=Path("knowledge_base/agrifood_translations_v0.3.json"),
+    )
     parser.add_argument("--guide", type=Path, default=Path("knowledge_base/guide.json"))
     parser.add_argument("--sources", type=Path, default=Path("knowledge_base/sources.json"))
     args = parser.parse_args()
