@@ -108,5 +108,7 @@ switch ($Command) {
         Invoke-LocalPython -Module 'scripts.restore_qdrant' -Arguments @('--manifest', $qdrantManifest, '--replace')
         Invoke-LocalPython -Module 'scripts.local_smoke_test'
     }
-    'smoke' { Invoke-LocalPython -Module 'scripts.local_smoke_test' }
+    'smoke' {
+        Invoke-Compose exec -T api python -m scripts.local_smoke_test
+    }
 }
