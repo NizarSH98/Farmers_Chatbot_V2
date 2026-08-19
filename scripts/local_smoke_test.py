@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from typing import Any
+from urllib.request import urlopen
 
 import psycopg
 from psycopg.rows import dict_row
@@ -33,6 +34,8 @@ class _NoFallback(RetrievalService):
 
 
 async def run() -> dict[str, Any]:
+    api_url = os.getenv("API_INTERNAL_URL", "http://127.0.0.1:8000").rstrip("/")
+    agreement_check = await asyncio.to_thread(_check_legal_api, api_url)
     database_url = os.getenv("DATABASE_URL", "")
     config = ProjectionConfig.from_env()
     with psycopg.connect(database_url, row_factory=dict_row) as connection:
@@ -96,9 +99,23 @@ async def run() -> dict[str, Any]:
         "release_id": row["release_id"],
         "evidence_points": evidence_count,
         "entity_points": entity_count,
+        "agreement": agreement_check,
         "probes": probes,
     }
 
+
+def _check_legal_api(api_url: str) -> dict[str, int]:
+    lengths: dict[str, int] = {}
+    for language in ("en", "ar"):
+        with urlopen(
+            f"{api_url}/v1/legal/agreement?language={language}", timeout=5
+        ) as response:
+            payload = json.load(response)
+        markdown = payload.get("markdown", "")
+        if not isinstance(markdown, str) or len(markdown.strip()) < 500:
+            raise RuntimeError(f"{language} user agreement is missing or incomplete")
+        lengths[language] = len(markdown)
+    return lengths
 
 def main() -> None:
     print(json.dumps(asyncio.run(run()), ensure_ascii=False, sort_keys=True))
