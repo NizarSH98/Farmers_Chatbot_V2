@@ -1,5 +1,6 @@
-from farmers_chatbot.arabizi import arabic_to_arabizi
 import pytest
+
+from farmers_chatbot.arabizi import arabic_to_arabizi
 
 pytestmark = pytest.mark.arabic
 

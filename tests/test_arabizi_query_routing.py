@@ -1,6 +1,7 @@
+import pytest
+
 from farmers_chatbot.qdrant_retrieval import QdrantGraphRetrieval
 from farmers_chatbot.retrieval import RetrievalRequest
-import pytest
 
 pytestmark = pytest.mark.arabic
 

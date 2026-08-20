@@ -200,13 +200,48 @@ rollout. Plan it as a release event, not a migration.
 
 | Stage | Content | State |
 |---|---|---|
-| 0 | Green gates, this plan committed, branch pushed | done |
+| 0 | Green gates, plan committed, branch pushed | done |
 | 1 | Tier 0 legacy-corpus excision | done |
-| 2 | Tier 1 deletions, one surface per commit, gates between | Streamlit done; compat shims and era-1 corpus done; WhatsApp wrapper and `mcp_server.py` repoint outstanding |
-| 3 | SQLite and `EvidenceStore` removal, PostgreSQL test fixtures, single local mode, archive script |
-| 4 | Ablation runner and graph profiling |
-| 5 | English/Arabic split and language-gap threshold |
-| 6 | Docs, branches, and `CLAUDE.md` rewritten against the pruned reality |
+| 2 | Tier 1 deletions and compatibility aliases | done |
+| 3 | PostgreSQL only, PostgreSQL test fixtures, containerised data commands, archive script | done |
+| 4 | Ablation runner and graph profiling | done |
+| 5 | English/Arabic split and language-gap threshold | done |
+| 6 | Docs, branches, and CLAUDE.md rewritten | done |
+
+## What the measurements said
+
+The ablation ladder now runs. On `release_4debc9a9de849675835bb255` over 240
+cases:
+
+| Arm | recall@10 | nDCG@10 | graph-path |
+|---|---|---|---|
+| vector | 0.9938 | 0.8900 | 0.000 |
+| contextual_hybrid | 0.9938 | 0.8897 | 0.836 |
+| hybrid_graph | 0.9938 | 0.8902 | 0.891 |
+
+Graph contribution over contextual hybrid: recall +0.0, nDCG +0.000455. The
+shuffled-path negative control collapses graph-path accuracy to 0.018, so path
+retrieval is real and case-specific. The graph is structurally sound: mean
+degree 3.8, 5% orphans, 33 relation types in use, top predicate 16% of edges,
+no ambiguous aliases across 649.
+
+The graph is therefore correct but unmeasurable here — dense and sparse fusion
+alone already reach 99.4% recall@10, leaving no headroom. The next useful step
+is a harder evaluation set, not a retrieval change.
+
+## Remaining after this plan
+
+- Answer-level evaluation: entailment, verifier enforcement, escalation, and
+  matched frontier comparisons. Needs provider credentials and human labels.
+- `APP_ENV=pilot` parity: local still runs `development` with auth disabled, so
+  the fail-closed hosted path is never exercised locally.
+- Private file storage differs between local disk and Supabase; MinIO would
+  close that gap.
+- `apps/web/components/ChatWorkspace.tsx` (1,850 lines) and
+  `farmers_chatbot/pilot_store.py` remain the largest hotspots.
+- The `pilot` and `release/pilot-2026-08` branches still exist on origin. They
+  forked in April 2026 and are far behind `master`; deleting them is a call for
+  the repository owner.
 
 Stages 1-3 remove roughly 25% of the codebase and two whole classes of
 divergence. Stage 4 determines whether the remaining architecture earns its

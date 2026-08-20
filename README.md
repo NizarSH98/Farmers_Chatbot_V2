@@ -15,11 +15,11 @@ retrieval, graph context, tools, citations, risk rules, and verification.
 
 ## Current architecture
 
-- Next.js is the canonical long-term interface. Streamlit is frozen as a
-  one-release compatibility facade; WhatsApp is a disabled thin FastAPI router.
+- Next.js is the only user interface. Streamlit has been removed. WhatsApp is
+  a disabled thin FastAPI router, retained for its Meta protocol handling.
 - `TurnCoordinator`, `AssistantEngine`, `ProviderClient`, and `ToolExecutor`
   provide one idempotent orchestration path with exactly one terminal turn.
-- PostgreSQL is authoritative for immutable releases, evidence, claims,
+- PostgreSQL is the only persistence backend and is authoritative for immutable releases, evidence, claims,
   relations, review state, projects, quotas, and activation history.
 - Qdrant 1.17.1 is a rebuildable exact-release projection with dense E5 vectors,
   BM25 sparse vectors, multilingual text fields, flat lineage payloads, scalar
@@ -33,7 +33,7 @@ retrieval, graph context, tools, citations, risk rules, and verification.
   and golden-set construction run locally.
 
 The active local pilot release is
-`release_bdc0dd68eb2c9b857994f664`: 36 sources, 36 documents, 192 chunks, 192
+`release_4debc9a9de849675835bb255`: 36 sources, 36 documents, 192 chunks, 192
 claims, 260 entities, 649 bilingual/local aliases, 494 passage-backed relations,
 and 686 evidence links. Its two Qdrant collections contain 384 evidence points
 and 260 entity points.
@@ -47,8 +47,9 @@ knowledge_base/
 |-- agrifood_knowledge_v0.3.en.md
 |-- agrifood_knowledge_v0.3.ar.md
 |-- agrifood_knowledge_v0.3.disposition.json
-|-- guide.json                         # migration/reference only
-|-- sources.json
+|-- legacy/                            # build inputs only, never served
+|   |-- guide.json
+|   `-- sources.json
 `-- README.md
 ```
 
@@ -76,8 +77,15 @@ Copy-Item .env.example .env
 .\scripts\raise.ps1 build-graph
 .\scripts\raise.ps1 smoke
 .\scripts\raise.ps1 evaluate
+.\scripts\raise.ps1 ablate
+.\scripts\raise.ps1 graph-profile
 .\scripts\raise.ps1 export
 ```
+
+PostgreSQL is required; there is no SQLite fallback and no bare-uvicorn
+mode. Data commands run inside the API container, so they need no host
+Python. If the published database port stops accepting connections on
+Windows, `docker compose restart postgres` repairs the Docker port proxy.
 
 Services bind only to localhost: web `3000`, API `8000`, PostgreSQL `55432`,
 and Qdrant `6433`. `export` writes a portable PostgreSQL dump, both Qdrant
@@ -96,8 +104,9 @@ repairs Qdrant aliases, and runs the smoke test.
 
 ```powershell
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
-python -m ruff check farmers_chatbot scripts tests
+python -m pytest -q -m "not arabic"
+python -m pytest -q -m arabic
+python -m ruff check farmers_chatbot scripts tests mcp_server.py
 pip-audit -r requirements.txt
 npm ci --prefix apps/web
 npm run typecheck --prefix apps/web
@@ -114,6 +123,13 @@ Local reports currently measure retrieval; answer-level safety/citation and
 matched GPT/Claude comparisons require authorized provider access and human
 review. The cases are never indexed as knowledge.
 
+`scripts/run_ablations.py` runs the ablation ladder and reports what graph
+expansion adds over contextual hybrid retrieval. On the current release that
+delta is ~0 because dense and sparse fusion alone already reach 99.4%
+recall@10, so the set has no headroom to demonstrate it either way. A
+shuffled-path negative control confirms graph path retrieval is real
+(0.891 -> 0.018). `scripts/profile_graph.py` describes the graph structurally.
+
 ## Interfaces and capabilities
 
 - REST/SSE `/v1/turns` remains backward compatible and supports idempotency,
@@ -125,7 +141,8 @@ review. The cases are never indexed as knowledge.
   unit conversion, action plans, checklists, crop calendars, referrals, source
   lookup, logframe status, and consented feedback.
 - MCP exposes bounded application tools without shell, arbitrary filesystem,
-  unrestricted URL, or generic database access.
+  unrestricted URL, or generic database access. It serves the activated release
+  and therefore requires PostgreSQL.
 - Dynamic weather, prices, alerts, grants, contacts, and regulations must come
   from an authorized connector carrying its passage, publisher, observation
   time, expiry, and immutable evidence ID.

@@ -1,11 +1,10 @@
 # Target Architecture
 
-Last updated: 2026-08-11
+Last updated: 2026-08-20
 
 > Current authority: Next.js on Vercel plus one FastAPI service on Render and
-> Supabase-managed data. Streamlit is a frozen compatibility client, not a
-> deployment target. WhatsApp remains disabled until the canonical web soak
-> passes. See `docs/CANONICAL_PILOT_RUNBOOK.md`.
+> Supabase-managed data. Streamlit has been removed. WhatsApp remains disabled
+> until the canonical web soak passes. See `docs/CANONICAL_PILOT_RUNBOOK.md`.
 
 ## Product boundary
 
@@ -17,11 +16,14 @@ The product is an Arabic-first, bilingual agricultural knowledge assistant for A
    - Versioned Markdown/JSON knowledge items instead of an opaque PDF-only corpus.
    - Stable source IDs and chunk metadata.
    - Separate static validated guidance from dynamic information.
-   - A versioned bilingual ontology with 162 typed entities, 352 aliases, and
-     183 passage-backed relations across all 21 planned entity types.
+   - A versioned bilingual ontology. The active release holds 260 typed
+     entities, 649 aliases, and 494 passage-backed relations across 32 entity
+     types and 33 relation types.
 2. **Retrieval layer**
-   - Bilingual lexical retrieval as the reproducible baseline.
-   - Benchmark-driven upgrade path to multilingual embeddings and hybrid ranking.
+   - Dense and sparse fusion over the activated release, with contextual hybrid
+     and two-hop graph routes above it.
+   - The ablation ladder (`scripts/run_ablations.py`) measures what each layer
+     contributes; `scripts/profile_graph.py` describes the graph itself.
    - Deterministic source cards and confidence signals.
 3. **Assistant layer**
    - One asynchronous `AssistantEngine` and one `ProviderClient` for every
@@ -46,8 +48,7 @@ The product is an Arabic-first, bilingual agricultural knowledge assistant for A
    - The MCP server does not expose arbitrary filesystem, shell, URL-fetch, or database-query tools.
 6. **Channel layer**
    - Next.js is the canonical Arabic-first web interface.
-   - Streamlit is retained for one compatibility release through the unified
-     facade, then its hosted deployment is retired.
+   - Streamlit has been removed.
    - WhatsApp is mounted but disabled; its router reuses the canonical service
      container, coordinator, engine, provider, tools, and persisted turns. The
      root module is only a one-release import wrapper.
@@ -104,11 +105,11 @@ Internal reasoning is never displayed as hidden chain-of-thought. The interface 
 
 ## Locked implementation decisions
 
-- Next.js is canonical; Streamlit retires after compatibility/parity.
+- Next.js is the only interface; Streamlit is removed.
 - WhatsApp remains disabled until the web soak; its thin FastAPI router is
   already mounted in the canonical backend.
-- Supabase PostgreSQL hosts lexical, vector, graph, provenance, and tenant data;
-  no Neo4j service is added.
+- PostgreSQL hosts lexical, vector, graph, provenance, and tenant data, and is
+  the only persistence backend; no Neo4j service is added.
 - OpenRouter remains the model and embedding gateway.
 
 ## Decisions still requiring team approval

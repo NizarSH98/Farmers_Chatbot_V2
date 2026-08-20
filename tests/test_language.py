@@ -1,5 +1,6 @@
-from farmers_chatbot.language import detect_language
 import pytest
+
+from farmers_chatbot.language import detect_language
 
 pytestmark = pytest.mark.arabic
 

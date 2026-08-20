@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from farmers_chatbot.arabizi import arabic_to_arabizi
 from farmers_chatbot.qdrant_retrieval import QdrantGraphRetrieval
 from farmers_chatbot.retrieval import RetrievalRequest
-import pytest
 
 pytestmark = pytest.mark.arabic
 
