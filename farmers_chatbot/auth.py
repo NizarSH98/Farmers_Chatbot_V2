@@ -1,4 +1,4 @@
-"""Google OIDC identity and application authorization helpers."""
+"""OIDC identity and application authorization helpers."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from .config import (
     ADMIN_EMAILS,
     ALLOWED_DOMAINS,
     ALLOWED_EMAILS,
-    AUTH_MODE,
 )
 
 GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
@@ -92,17 +91,3 @@ def development_identity() -> UserIdentity:
         is_admin=True,
         is_development=True,
     )
-
-
-def current_streamlit_identity(st_module: Any) -> UserIdentity | None:
-    """Return an authenticated identity, or None when login is required."""
-
-    if AUTH_MODE == "disabled":
-        return development_identity()
-    if AUTH_MODE != "google":
-        raise IdentityError("AUTH_MODE must be 'disabled' or 'google'.")
-
-    user = st_module.user
-    if not bool(getattr(user, "is_logged_in", False)):
-        return None
-    return identity_from_claims(dict(user))

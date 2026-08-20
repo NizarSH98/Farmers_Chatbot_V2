@@ -19,7 +19,7 @@ COPY knowledge_base ./knowledge_base
 COPY config ./config
 COPY legal ./legal
 COPY scripts ./scripts
-COPY rag_chatbot.py mcp_server.py whatsapp_api.py ./
+COPY mcp_server.py whatsapp_api.py ./
 
 RUN mkdir -p /app/data /app/model-cache /app/reports/generated \
     && chown -R raise:raise /app

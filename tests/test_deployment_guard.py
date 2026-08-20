@@ -6,7 +6,6 @@ from collections.abc import Mapping
 import pytest
 
 from farmers_chatbot.deployment_guard import (
-    validate_streamlit_runtime,
     validate_web_runtime,
 )
 from farmers_chatbot.migration_status import EXPECTED_DATABASE_REVISION
@@ -168,29 +167,3 @@ def test_hosted_web_fails_when_database_revision_is_not_ready() -> None:
         validate_web_runtime(settings=settings, revision_checker=checker)
 
 
-def test_streamlit_uses_google_auth_policy_not_web_auth_policy() -> None:
-    settings = _settings(
-        _hosted_environment(
-            WEB_AUTH_MODE="disabled",
-            SUPABASE_PUBLISHABLE_KEY="",
-            WEB_ALLOWED_ORIGINS="",
-        )
-    )
-    assert (
-        validate_streamlit_runtime(
-            settings=settings,
-            revision_checker=lambda _: "20260811_0001",
-        )
-        is settings
-    )
-
-
-def test_streamlit_rejects_missing_google_admin_configuration() -> None:
-    settings = _settings(
-        _hosted_environment(AUTH_MODE="disabled", ADMIN_EMAILS="")
-    )
-    with pytest.raises(RuntimeError, match="AUTH_MODE=google"):
-        validate_streamlit_runtime(
-            settings=settings,
-            check_database_revision=False,
-        )

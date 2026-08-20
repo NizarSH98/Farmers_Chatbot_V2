@@ -34,7 +34,8 @@ def main() -> int:
     required = {
         '.github/workflows/ci.yml',
         'alembic.ini',
-        'deployment/streamlit_secrets.toml.example',
+        'compose.yaml',
+        'Dockerfile.api',
         'farmers_chatbot/legal.py',
         'legal/PRIVACY_POLICY.ar.md',
         'legal/PRIVACY_POLICY.en.md',
@@ -43,7 +44,6 @@ def main() -> int:
         'migrations/001_pilot_schema.sql',
         'migrations/env.py',
         'migrations/versions/20260811_0001_legacy_schema_baseline.py',
-        'rag_chatbot.py',
         'render.yaml',
         'requirements.txt',
         'scripts/pilot_data_portability.py',
@@ -61,14 +61,10 @@ def main() -> int:
         errors.append('Render must apply Alembic migrations before service startup.')
 
     requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8')
-    if 'streamlit==' not in requirements:
-        errors.append('Pin Streamlit exactly for reproducible Community Cloud builds.')
     if 'alembic>=' not in requirements:
         errors.append('Alembic must be installed as a runtime deployment dependency.')
 
-    secrets = (ROOT / 'deployment/streamlit_secrets.toml.example').read_text(
-        encoding='utf-8'
-    )
+    secrets = (ROOT / '.env.example').read_text(encoding='utf-8')
     for key in (
         'APP_ENV',
         'APP_DISPLAY_NAME',
@@ -82,7 +78,7 @@ def main() -> int:
         'SUPABASE_SERVICE_ROLE_KEY',
     ):
         if key not in secrets:
-            errors.append(f'Managed secrets template is missing {key}.')
+            errors.append(f'Environment template is missing {key}.')
 
     if errors:
         print('Pilot release preflight failed:')

@@ -102,27 +102,6 @@ def _surface_issues(settings: RuntimeSettings, surface: str) -> list[str]:
             if origin == "*" or not _is_https_url(origin):
                 issues.append("WEB_ALLOWED_ORIGINS (explicit HTTPS origins only)")
                 break
-    elif surface == "streamlit":
-        if settings.auth_mode != "google":
-            issues.append("AUTH_MODE=google")
-        if settings.access_policy not in {
-            "google_any",
-            "email_allowlist",
-            "domain_allowlist",
-        }:
-            issues.append("ACCESS_POLICY")
-        if (
-            settings.access_policy == "email_allowlist"
-            and not settings.allowed_emails
-        ):
-            issues.append("ALLOWED_EMAILS")
-        if (
-            settings.access_policy == "domain_allowlist"
-            and not settings.allowed_domains
-        ):
-            issues.append("ALLOWED_DOMAINS")
-        if not settings.admin_emails:
-            issues.append("ADMIN_EMAILS")
     else:
         raise ValueError(f"Unknown hosted surface: {surface}")
     return issues
@@ -164,9 +143,3 @@ def validate_web_runtime(**kwargs: object) -> RuntimeSettings:
     """Validate the hosted Next.js/FastAPI service configuration."""
 
     return validate_runtime("web", **kwargs)
-
-
-def validate_streamlit_runtime(**kwargs: object) -> RuntimeSettings:
-    """Validate the temporary hosted Streamlit compatibility surface."""
-
-    return validate_runtime("streamlit", **kwargs)

@@ -1,6 +1,0 @@
--r requirements.txt
-
-# Optional local speech-to-text. The app works without this file.
-openai-whisper>=20231117
-torch>=2.7,<3
-
