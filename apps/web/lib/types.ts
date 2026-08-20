@@ -138,6 +138,8 @@ export interface Message {
   artifact_ids?: string[];
   created_at: string;
   pending?: boolean;
+  /** Characters of `content` revealed so far. Undefined means show all. */
+  revealChars?: number;
   feedback?: "helpful" | "not_helpful";
   feedbackPending?: boolean;
 }

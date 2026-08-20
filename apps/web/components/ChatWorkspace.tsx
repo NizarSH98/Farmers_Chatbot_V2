@@ -45,7 +45,7 @@ import {
   streamTurn,
   uploadImage
 } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { t, thinkingLines } from "@/lib/i18n";
 import { mergePreservingClientState } from "@/lib/messages";
 import { supabaseBrowser } from "@/lib/supabase";
 import type {
@@ -128,7 +128,9 @@ export function ChatWorkspace() {
   const [loading, setLoading] = useState(!LOCAL_AUTH);
   const [sending, setSending] = useState(false);
   const [statusStage, setStatusStage] = useState("");
+  const [thinkingIndex, setThinkingIndex] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [conversationsOpen, setConversationsOpen] = useState(true);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>({
@@ -224,6 +226,48 @@ export function ChatWorkspace() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, statusStage]);
+
+  // Rotate the waiting copy so a long turn reads as progress rather than a
+  // stalled spinner. The lines describe what the pipeline is actually doing.
+  useEffect(() => {
+    if (!sending) return;
+    const lines = thinkingLines(language);
+    const timer = window.setInterval(() => {
+      setThinkingIndex((value) => (value + 1) % lines.length);
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, [language, sending]);
+
+  // Reveal the finished answer at reading pace. The text is verified before it
+  // arrives, so this is presentation only: it never shows unverified content.
+  // Long answers reveal faster so the total wait stays roughly constant.
+  useEffect(() => {
+    const pending = messages.find(
+      (item) =>
+        item.revealChars !== undefined && item.revealChars < item.content.length
+    );
+    if (!pending) return;
+    let frame = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const elapsed = now - last;
+      last = now;
+      setMessages((items) =>
+        items.map((item) => {
+          if (item.id !== pending.id || item.revealChars === undefined) return item;
+          const remaining = item.content.length - item.revealChars;
+          if (remaining <= 0) return item;
+          const perSecond = Math.min(6000, Math.max(700, item.content.length / 2.2));
+          const advance = Math.max(1, Math.round((perSecond * elapsed) / 1000));
+          const next = Math.min(item.content.length, item.revealChars + advance);
+          return { ...item, revealChars: next };
+        })
+      );
+      frame = window.requestAnimationFrame(step);
+    };
+    frame = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -430,7 +474,15 @@ export function ChatWorkspace() {
 
   const appendPending = (id: string, delta: string) => {
     setMessages((items) => items.map((item) =>
-      item.id === id ? { ...item, content: item.content + delta } : item
+      item.id === id
+        ? {
+            ...item,
+            content: item.content + delta,
+            // Hold the reveal at its current position; the animation advances
+            // it. Undefined would mean "already fully shown".
+            revealChars: item.revealChars ?? 0
+          }
+        : item
     ));
   };
 
@@ -444,6 +496,7 @@ export function ChatWorkspace() {
     if (!question) return;
     setError("");
     setSending(true);
+    setThinkingIndex(0);
     setStatusStage("analysis_and_retrieval");
     let conversationId = activeId;
     let assistantId = "";
@@ -562,7 +615,9 @@ export function ChatWorkspace() {
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") {
         setMessages((items) => items.map((item) =>
-          item.pending ? { ...item, pending: false, status: "cancelled" } : item
+          item.pending
+            ? { ...item, pending: false, status: "cancelled", revealChars: undefined }
+            : item
         ));
       } else if (caught instanceof IncompleteTurnError) {
         let recovered = false;
@@ -1038,8 +1093,32 @@ export function ChatWorkspace() {
                 value={search}
               />
             </label>
-            <p className="rail-label">{text("conversations")}</p>
-            <nav aria-label={text("conversations")} className="conversation-list">
+            <button
+              aria-controls="conversation-list"
+              aria-expanded={conversationsOpen}
+              className="rail-label rail-label-toggle"
+              onClick={() => setConversationsOpen((value) => !value)}
+              type="button"
+            >
+              <span>{text("conversations")}</span>
+              <ChevronDown
+                aria-label={
+                  conversationsOpen
+                    ? text("hideConversations")
+                    : text("showConversations")
+                }
+                className={conversationsOpen ? "disclosure open" : "disclosure"}
+              />
+            </button>
+            <nav
+              aria-label={text("conversations")}
+              className={
+                conversationsOpen
+                  ? "conversation-list"
+                  : "conversation-list is-collapsed"
+              }
+              id="conversation-list"
+            >
               {filteredConversations.length === 0 && (
                 <p className="empty-rail">{text("noConversations")}</p>
               )}
@@ -1202,10 +1281,19 @@ export function ChatWorkspace() {
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {message.content
-                          ? withCitationMarkers(message.content)
-                          : message.pending ? stageLabel : ""}
+                          ? withCitationMarkers(
+                              message.revealChars === undefined
+                                ? message.content
+                                : message.content.slice(0, message.revealChars)
+                            )
+                          : ""}
                       </ReactMarkdown>
                     </div>
+                    {message.pending && !message.content && (
+                      <p className="pending-line">
+                        {thinkingLines(language)[thinkingIndex]}
+                      </p>
+                    )}
                     {message.warning && (
                       <div className="warning-box"><strong>{text("warning")}</strong>{message.warning}</div>
                     )}
@@ -1394,7 +1482,17 @@ export function ChatWorkspace() {
                 </article>
               ))}
               {sending && statusStage && (
-                <div className="stage-indicator"><span />{stageLabel}</div>
+                <div aria-live="polite" className="stage-indicator">
+                  <span className="thinking-dots" aria-hidden="true">
+                    <i /><i /><i />
+                  </span>
+                  <span className="stage-copy">
+                    <strong>{stageLabel}</strong>
+                    <em key={thinkingIndex}>
+                      {thinkingLines(language)[thinkingIndex]}
+                    </em>
+                  </span>
+                </div>
               )}
               <div ref={endRef} />
             </div>

@@ -10,6 +10,8 @@ const copy = {
     privacyNote: "لن نطلب كلمة مرور Google، ولن نشارك محادثاتك مع مستخدمين آخرين.",
     newChat: "محادثة جديدة",
     conversations: "المحادثات",
+    hideConversations: "إخفاء قائمة المحادثات",
+    showConversations: "إظهار قائمة المحادثات",
     search: "ابحث في المحادثات",
     noConversations: "لا توجد محادثات بعد",
     welcome: "كيف يمكنني مساعدتك اليوم؟",
@@ -53,6 +55,16 @@ const copy = {
     agreementReject: "تسجيل الخروج",
     loading: "جارٍ التحميل…",
     analyzing: "أفهم السؤال وأراجع المعلومات المناسبة…",
+    thinkingLines: [
+      "أقرأ سؤالك بعناية…",
+      "أبحث في قاعدة المعرفة الزراعية…",
+      "أراجع المصادر المعتمدة…",
+      "أربط المعلومات ببعضها…",
+      "أتحقق من ملاءمة التوصية لعكار…",
+      "أراعي مرحلة نمو المحصول والتربة…",
+      "أرتّب الخطوات العملية…",
+      "أتأكد من ذكر المصادر…",
+    ],
     generation: "أُعدّ جواباً عملياً…",
     verification: "أتحقق من الدقة والسلامة…",
     uploadError: "تعذّر رفع الصورة. استخدم JPG أو PNG بحجم أقل من 5 ميغابايت.",
@@ -87,6 +99,8 @@ const copy = {
     privacyNote: "We never receive your Google password or share chats with other users.",
     newChat: "New conversation",
     conversations: "Conversations",
+    hideConversations: "Hide conversation list",
+    showConversations: "Show conversation list",
     search: "Search conversations",
     noConversations: "No conversations yet",
     welcome: "How can I help today?",
@@ -130,6 +144,16 @@ const copy = {
     agreementReject: "Sign out",
     loading: "Loading…",
     analyzing: "Understanding the question and checking relevant information…",
+    thinkingLines: [
+      "Reading your question carefully…",
+      "Searching the agricultural knowledge base…",
+      "Reviewing approved sources…",
+      "Connecting related guidance…",
+      "Checking what applies to Akkar…",
+      "Considering crop stage and soil…",
+      "Putting the practical steps in order…",
+      "Making sure every claim is cited…",
+    ],
     generation: "Preparing a practical answer…",
     verification: "Checking accuracy and safety…",
     uploadError: "Image upload failed. Use JPG or PNG under 5 MB.",
@@ -157,5 +181,16 @@ const copy = {
   }
 } as const;
 
-export type CopyKey = keyof typeof copy.ar;
-export const t = (language: Language, key: CopyKey): string => copy[language][key];
+// Only string entries are addressable through `t`; list entries (such as the
+// rotating thinking lines) have their own accessor so the return type stays a
+// plain string at every call site.
+type Copy = typeof copy.ar;
+export type CopyKey = {
+  [K in keyof Copy]: Copy[K] extends string ? K : never;
+}[keyof Copy];
+
+export const t = (language: Language, key: CopyKey): string =>
+  copy[language][key] as string;
+
+export const thinkingLines = (language: Language): readonly string[] =>
+  copy[language].thinkingLines;

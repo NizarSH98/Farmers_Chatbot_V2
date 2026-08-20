@@ -1,27 +1,69 @@
 :root {
-  --forest-950: #0d2b21;
-  --forest-800: #174f3a;
-  --forest-700: #1e6549;
-  --forest-100: #e2f1e9;
-  --leaf-500: #68a63f;
-  --sand-50: #f6f9f2;
-  --sand-100: #e6eddf;
-  --gold-500: #c68a24;
-  --ink-900: #17211c;
-  --ink-700: #44514a;
-  --ink-500: #6b7670;
-  --line: #c8d5c3;
-  --danger: #a53a35;
-  --danger-bg: #fff1f0;
-  --warning-bg: #fff7df;
-  --warning-border: #e5b85d;
-  --surface: #fffefa;
-  --shadow: 0 18px 55px rgb(13 43 33 / 12%);
-  --citation-bg: #e2f1e9;
-  --citation-bg-hover: #cfe7db;
-  --citation-border: #a9cdba;
-  --citation-border-hover: #6f9f86;
-  --citation-fg: #174f3a;
+  /* Deep canopy + warm clay.
+     Deep forest anchors chrome and headings so the tool reads as an
+     agricultural reference rather than a demo. Warm clay is the single action
+     accent, used sparingly so it stays meaningful. New-growth green is
+     reserved for evidence and confirmation. Backgrounds are warm paper rather
+     than tinted green, which keeps long Arabic passages readable in sunlight. */
+
+  /* Canopy — chrome, headings, structure */
+  --forest-950: #0b2a20;
+  --forest-900: #0f3527;
+  --forest-800: #123b2e;
+  --forest-700: #1a5340;
+  --forest-600: #227055;
+  --forest-500: #2e8a69;
+  --forest-300: #86c3ab;
+  --forest-100: #d8ede3;
+  --forest-50: #edf7f2;
+
+  /* Clay — the one action accent */
+  --clay-700: #8c3d20;
+  --clay-600: #a34a28;
+  --clay-500: #c2603a;
+  --clay-300: #e5a98c;
+  --clay-100: #f8e3d8;
+
+  /* New growth — evidence, confirmation, live signals */
+  --leaf-600: #598a24;
+  --leaf-500: #6fa82f;
+  --leaf-100: #e7f2d8;
+
+  --gold-500: #b8801f;
+
+  /* Paper and ink */
+  --paper: #faf7f0;
+  --surface: #ffffff;
+  --surface-2: #f4f1e9;
+  --sand-50: #faf7f0;
+  --sand-100: #f0ece1;
+  --sand-200: #e4dfd2;
+  --ink-900: #14201a;
+  --ink-800: #22302a;
+  --ink-700: #46554d;
+  --ink-500: #6e7c74;
+  --ink: #14201a;
+
+  /* Warm neutral lines read as paper, not as a green tint */
+  --line: #ded9cd;
+  --line-strong: #c6c0b2;
+
+  --danger: #9b3327;
+  --danger-bg: #fdf0ed;
+  --danger-border: #e8b6aa;
+  --warning-bg: #fdf5e2;
+  --warning-border: #dfba63;
+
+  --shadow: 0 20px 60px rgb(11 42 32 / 14%);
+  --shadow-sm: 0 2px 10px rgb(11 42 32 / 8%);
+  --focus-ring: 0 0 0 3px rgb(46 138 105 / 35%);
+
+  --citation-bg: var(--leaf-100);
+  --citation-bg-hover: #d8ebc2;
+  --citation-border: #b6d38f;
+  --citation-border-hover: var(--leaf-500);
+  --citation-fg: var(--leaf-600);
+
   color-scheme: light;
 }
 
@@ -36,7 +78,7 @@ body {
 }
 
 body {
-  background: #e8f0e3;
+  background: var(--paper);
   color: var(--ink-900);
   font-family: "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   font-size: 16px;
@@ -192,13 +234,14 @@ svg {
 }
 
 .primary-button {
-  background: var(--forest-800);
-  border: 1px solid var(--forest-800);
+  background: var(--clay-500);
+  border: 1px solid var(--clay-600);
+  box-shadow: var(--shadow-sm);
   color: white;
 }
 
 .primary-button:hover {
-  background: var(--forest-700);
+  background: var(--clay-600);
 }
 
 .secondary-button {
@@ -208,7 +251,7 @@ svg {
 
 .danger-button {
   background: var(--danger-bg);
-  border: 1px solid #efc3bf;
+  border: 1px solid var(--danger-border);
   color: var(--danger);
 }
 
@@ -936,7 +979,7 @@ svg {
 
 .composer-box {
   background: var(--surface);
-  border: 1px solid #cfd8d2;
+  border: 1px solid var(--line);
   border-radius: 18px;
   box-shadow: 0 10px 32px rgb(13 43 33 / 10%);
   padding: 11px;
@@ -1050,7 +1093,7 @@ svg {
 
 .error-banner {
   background: var(--danger-bg);
-  border: 1px solid #efc3bf;
+  border: 1px solid var(--danger-border);
   border-radius: 11px;
   color: var(--danger);
   margin: 12px 0;
@@ -1615,49 +1658,49 @@ svg {
 
 /* Bright, clearly separated application surfaces. */
 .history-rail {
-  background: #e3ebdb;
-  border-color: #bdccb6;
+  background: var(--surface-2);
+  border-color: var(--line-strong);
 }
 
 .chat-column {
-  background: #f7faf4;
+  background: var(--sand-50);
 }
 
 .top-bar {
   background: rgb(238 245 233 / 96%);
-  border-color: #c1d0ba;
+  border-color: var(--line-strong);
 }
 
 .message-scroll {
   background:
     radial-gradient(circle at 50% 0, rgb(255 254 250 / 90%), transparent 38%),
-    #f7faf4;
+    var(--sand-50);
 }
 
 .suggestion-grid button {
-  background: #fffefa;
-  border-color: #c5d3bf;
+  background: var(--surface);
+  border-color: var(--line);
   box-shadow: 0 5px 18px rgb(13 43 33 / 5%);
 }
 
 .message.user .message-body {
-  background: #e3ecdc;
-  border: 1px solid #c2d1ba;
+  background: var(--forest-50);
+  border: 1px solid var(--line-strong);
 }
 
 .composer-area {
-  background: linear-gradient(to top, #edf4e9 72%, rgb(237 244 233 / 0%));
+  background: linear-gradient(to top, var(--sand-100) 72%, rgb(237 244 233 / 0%));
 }
 
 .composer-box {
-  border-color: #b9cbb2;
+  border-color: var(--line-strong);
   box-shadow: 0 12px 34px rgb(13 43 33 / 13%);
 }
 
 .message-image-attachment {
   align-items: center;
   background: rgb(255 254 250 / 82%);
-  border: 1px solid #bdccb6;
+  border: 1px solid var(--line-strong);
   border-radius: 13px;
   display: inline-flex;
   flex-direction: column;
@@ -1701,8 +1744,8 @@ svg {
 .composer-mode-select select,
 .select-control select {
   appearance: none;
-  background: #edf3e8;
-  border: 1px solid #c0cfb9;
+  background: var(--sand-100);
+  border: 1px solid var(--line-strong);
   color: var(--forest-800);
   cursor: pointer;
   font-weight: 750;
@@ -1733,13 +1776,13 @@ svg {
 }
 
 .settings-modal {
-  background: #f4f8f0;
+  background: var(--sand-50);
   max-width: 560px;
 }
 
 .settings-section {
-  background: #fffefa;
-  border: 1px solid #c8d5c3;
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 14px;
   margin-bottom: 10px;
   padding: 14px;
@@ -1751,8 +1794,8 @@ svg {
 }
 
 .quick-reply-btn {
-  background: #fffefa;
-  border: 1.5px solid #aabd9f;
+  background: var(--surface);
+  border: 1.5px solid var(--line-strong);
   box-shadow: 0 4px 12px rgb(13 43 33 / 7%);
   color: var(--ink-900);
   font-weight: 650;
@@ -1760,7 +1803,7 @@ svg {
 }
 
 .quick-reply-btn:hover {
-  background: #e8f1e2;
+  background: var(--forest-50);
   border-color: var(--forest-700);
   box-shadow: 0 5px 16px rgb(13 43 33 / 12%);
 }
@@ -1772,8 +1815,8 @@ svg {
 
 .custom-reply {
   align-items: stretch;
-  background: #eef4e9;
-  border: 1.5px solid #aabd9f;
+  background: var(--sand-100);
+  border: 1.5px solid var(--line-strong);
   border-radius: 12px;
   display: flex;
   gap: 7px;
@@ -1781,8 +1824,8 @@ svg {
 }
 
 .custom-reply input {
-  background: #fffefa;
-  border: 1px solid #b9c9b2;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
   flex: 1;
   min-width: 0;
@@ -1819,8 +1862,8 @@ svg {
 }
 
 .clarification-form {
-  background: #eef4e9;
-  border: 1.5px solid #9db493;
+  background: var(--sand-100);
+  border: 1.5px solid var(--line-strong);
   border-radius: 16px;
   display: grid;
   gap: 14px;
@@ -1871,14 +1914,14 @@ svg {
 
 .quick-reply-btn.selected,
 .quick-reply-btn[aria-pressed="true"] {
-  background: #d9ead1;
+  background: var(--leaf-100);
   border-color: var(--forest-800);
   box-shadow: 0 0 0 2px rgb(23 79 58 / 10%);
 }
 
 .clarification-text-answer {
-  background: #fffefa;
-  border: 1.5px solid #aabd9f;
+  background: var(--surface);
+  border: 1.5px solid var(--line-strong);
   border-radius: 10px;
   font: inherit;
   outline: 0;
@@ -1948,4 +1991,179 @@ svg {
 .evidence-panel li:target {
   background: var(--citation-bg);
   border-radius: 8px;
+}
+
+/* Focus visibility ---------------------------------------------------------
+   A serious tool is keyboard navigable. One consistent ring on every control,
+   in canopy green so it never competes with the clay action accent. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--forest-600);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.send-button:hover:not(:disabled) {
+  background: var(--clay-600);
+}
+
+/* Headings carry the canopy so structure reads before content does. */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: var(--forest-800);
+  letter-spacing: -0.01em;
+}
+
+.markdown-body strong {
+  color: var(--forest-900);
+}
+
+/* Quoted guidance sits on paper with a canopy rule, like a field manual. */
+.markdown-body blockquote {
+  margin-inline: 0;
+  padding: 0.6rem 1rem;
+  border-inline-start: 3px solid var(--forest-300);
+  background: var(--sand-50);
+  border-radius: 0 10px 10px 0;
+  color: var(--ink-700);
+}
+
+[dir="rtl"] .markdown-body blockquote {
+  border-radius: 10px 0 0 10px;
+}
+
+/* Conversation list disclosure ---------------------------------------------
+   Uses logical properties throughout, so it mirrors correctly in Arabic
+   without a separate [dir="rtl"] rule. The chevron rotates rather than
+   pointing sideways, which stays meaningful in both directions. */
+.rail-label-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.15rem;
+  border: 0;
+  background: none;
+  color: var(--ink-500);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: start;
+  text-transform: uppercase;
+  transition: color 140ms ease;
+}
+
+.rail-label-toggle:hover {
+  color: var(--forest-700);
+}
+
+.rail-label-toggle .disclosure {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  transform: rotate(-90deg);
+  transition: transform 180ms ease;
+}
+
+[dir="rtl"] .rail-label-toggle .disclosure {
+  transform: rotate(90deg);
+}
+
+.rail-label-toggle .disclosure.open,
+[dir="rtl"] .rail-label-toggle .disclosure.open {
+  transform: rotate(0deg);
+}
+
+.conversation-list {
+  overflow: hidden;
+  transition: max-height 220ms ease, opacity 160ms ease;
+}
+
+.conversation-list.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-label-toggle .disclosure,
+  .conversation-list {
+    transition: none;
+  }
+}
+
+/* Thinking indicator -------------------------------------------------------
+   The pipeline genuinely has stages, so the bold line names the real one and
+   the rotating line describes the work. Both are announced politely rather
+   than interrupting a screen reader on every rotation. */
+.stage-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.stage-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.stage-copy strong {
+  color: var(--forest-800);
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.stage-copy em {
+  color: var(--ink-500);
+  font-size: 0.8rem;
+  font-style: normal;
+  animation: thinking-line-in 420ms ease both;
+}
+
+.pending-line {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: 0.9rem;
+  animation: thinking-line-in 420ms ease both;
+}
+
+@keyframes thinking-line-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.thinking-dots {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+}
+
+.thinking-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--leaf-500);
+  animation: thinking-pulse 1.05s ease-in-out infinite;
+}
+
+.thinking-dots i:nth-child(2) { animation-delay: 0.16s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes thinking-pulse {
+  0%, 80%, 100% { opacity: 0.28; transform: scale(0.82); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dots i,
+  .stage-copy em,
+  .pending-line {
+    animation: none;
+  }
+
+  .thinking-dots i { opacity: 0.7; }
 }
