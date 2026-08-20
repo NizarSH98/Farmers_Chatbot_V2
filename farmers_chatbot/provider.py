@@ -7,9 +7,14 @@ import os
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+import instructor
+import openai
+from instructor.core.hooks import HookName, Hooks
+from instructor.v2.providers.openrouter.client import from_openrouter
+from pydantic import BaseModel
 
 from .config import (
     APP_PUBLIC_URL,
@@ -21,6 +26,8 @@ from .config import (
 OPENROUTER_EMBEDDINGS_URL = os.getenv(
     "OPENROUTER_EMBEDDINGS_URL", "https://openrouter.ai/api/v1/embeddings"
 )
+
+StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -70,8 +77,8 @@ class ProviderClient:
         client: httpx.AsyncClient | None = None,
         on_record: Callable[[ProviderCallRecord], None] | None = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.getenv(
-            "OPENROUTER_API_KEY", ""
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY", "")
         )
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(45.0, connect=8.0),
@@ -130,6 +137,78 @@ class ProviderClient:
                     model=model,
                     duration_ms=self._elapsed(started),
                     outcome="failed",
+                    error_type=type(exc).__name__,
+                )
+            )
+            raise
+
+    async def complete_structured(
+        self,
+        *,
+        stage: str,
+        model: str,
+        messages: list[dict[str, Any]],
+        response_model: type[StructuredModel],
+        validation_context: dict[str, Any] | None = None,
+        max_retries: int = 1,
+        timeout: float = 20.0,
+        max_tokens: int = 600,
+    ) -> StructuredModel:
+        """Return a validated model through Instructor's OpenRouter adapter."""
+
+        if not self.api_key:
+            raise RuntimeError("OpenRouter is not configured")
+        started = time.perf_counter()
+        responses: list[Any] = []
+        hooks = Hooks()
+        hooks.on(HookName.COMPLETION_RESPONSE, responses.append)
+        openai_client = openai.AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=OPENROUTER_API_URL.rsplit("/chat/completions", 1)[0],
+            timeout=timeout,
+            default_headers=self.headers(),
+            http_client=self._client,
+        )
+        client = from_openrouter(
+            openai_client,
+            model=model,
+            mode=instructor.Mode.JSON_SCHEMA,
+        )
+        try:
+            result, completion = await client.create_with_completion(
+                messages=messages,
+                response_model=response_model,
+                max_retries=max_retries,
+                context=validation_context,
+                temperature=0,
+                max_tokens=max_tokens,
+                extra_body={
+                    "provider": self.policy(),
+                    "reasoning": {"effort": "low", "exclude": True},
+                },
+                hooks=hooks,
+            )
+            if not responses:
+                responses.append(completion)
+            usage = self._aggregate_completion_usage(responses)
+            self._record(
+                ProviderCallRecord(
+                    stage=stage,
+                    model=model,
+                    duration_ms=self._elapsed(started),
+                    outcome="success",
+                    usage=usage,
+                )
+            )
+            return result
+        except Exception as exc:
+            self._record(
+                ProviderCallRecord(
+                    stage=stage,
+                    model=model,
+                    duration_ms=self._elapsed(started),
+                    outcome="failed",
+                    usage=self._aggregate_completion_usage(responses),
                     error_type=type(exc).__name__,
                 )
             )
@@ -312,6 +391,31 @@ class ProviderClient:
         self.records.append(record)
         if self._on_record:
             self._on_record(record)
+
+    @staticmethod
+    def _aggregate_completion_usage(responses: list[Any]) -> ProviderUsage:
+        prompt = completion = 0
+        cost = 0.0
+        saw_prompt = saw_completion = saw_cost = False
+        for response in responses:
+            usage = getattr(response, "usage", None)
+            prompt_value = getattr(usage, "prompt_tokens", None)
+            completion_value = getattr(usage, "completion_tokens", None)
+            cost_value = getattr(usage, "cost", None)
+            if prompt_value is not None:
+                prompt += int(prompt_value)
+                saw_prompt = True
+            if completion_value is not None:
+                completion += int(completion_value)
+                saw_completion = True
+            if cost_value is not None:
+                cost += float(cost_value)
+                saw_cost = True
+        return ProviderUsage(
+            prompt_tokens=prompt if saw_prompt else None,
+            completion_tokens=completion if saw_completion else None,
+            cost_usd=cost if saw_cost else None,
+        )
 
     @staticmethod
     def _usage(value: dict[str, Any]) -> ProviderUsage:

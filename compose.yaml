@@ -48,6 +48,7 @@ services:
       APP_ENV: development
       APP_PUBLIC_URL: http://localhost:3000
       DATABASE_URL: postgresql://raise:${RAISE_LOCAL_DB_PASSWORD:-raise-local-only}@postgres:5432/raise
+      CLARIFICATION_DATABASE_URL: postgresql://raise:${RAISE_LOCAL_DB_PASSWORD:-raise-local-only}@postgres:5432/raise
       WEB_AUTH_MODE: disabled
       AUTH_MODE: disabled
       WEB_ALLOWED_ORIGINS: http://localhost:3000
@@ -58,7 +59,7 @@ services:
       RAG_BACKEND: ${RAG_BACKEND:-qdrant}
       RAG_LOCAL_EMBEDDING_MODEL: ${RAG_LOCAL_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       RAG_LOCAL_EMBEDDING_DIMENSIONS: ${RAG_LOCAL_EMBEDDING_DIMENSIONS:-384}
-      ENABLE_TRUSTED_WEB_SEARCH: "false"
+      ENABLE_TRUSTED_WEB_SEARCH: ${ENABLE_TRUSTED_WEB_SEARCH:-false}
       WHATSAPP_ENABLED: "false"
     extra_hosts:
       - "host.docker.internal:host-gateway"

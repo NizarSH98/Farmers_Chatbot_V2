@@ -83,6 +83,36 @@ export interface Citation {
   [key: string]: unknown;
 }
 
+export interface ClarificationOption {
+  id: string;
+  label: string;
+  value: string;
+  kind?: "standard" | "other" | "unknown";
+}
+
+export interface ClarificationQuestion {
+  id: string;
+  prompt: string;
+  answer_type: "single" | "multiple" | "text";
+  required: boolean;
+  allow_other: boolean;
+  options: ClarificationOption[];
+}
+
+export interface ClarificationInteraction {
+  schema_version: string;
+  interaction_id?: string;
+  type: "clarification";
+  status?: "pending" | "resolved";
+  round: number;
+  max_rounds: number;
+  questions?: ClarificationQuestion[];
+  question: string;
+  options: ClarificationOption[];
+  missing_fields: string[];
+  language: string;
+}
+
 export interface Message {
   id: string;
   clientKey?: string;
@@ -93,12 +123,15 @@ export interface Message {
   model?: string;
   warning?: string;
   quickReplies?: string[];
+  interaction?: ClarificationInteraction;
   citations: Citation[];
   tools: string[];
   attachments: Array<{
     kind: string;
     mime_type?: string;
     storage_path?: string;
+    name?: string;
+    preview_url?: string;
   }>;
   artifact_ids?: string[];
   created_at: string;
@@ -128,4 +161,8 @@ export interface TurnPayload {
   model_id?: string;
   clarification_style: string;
   attachment_ids: string[];
+  clarification_response?: {
+    interaction_id: string;
+    answers: Record<string, string | string[]>;
+  };
 }

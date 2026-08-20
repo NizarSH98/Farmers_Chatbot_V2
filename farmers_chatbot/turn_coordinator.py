@@ -139,6 +139,7 @@ class TurnCoordinator:
             ),
             provider_calls=result.provider_calls,
             terminal_sequence=terminal_sequence,
+            interaction=result.interaction,
         )
 
     def fail(

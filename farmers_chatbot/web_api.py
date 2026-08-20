@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import io
 import json
 import os
 import time
@@ -29,8 +28,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
-from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .artifacts import ArtifactService
 from .assistant_contracts import TURN_SCHEMA_VERSION, TurnCommand
@@ -51,6 +49,7 @@ from .deployment_guard import validate_web_runtime
 from .documents import DocumentService
 from .embedding_approval import EmbeddingApprovalError, load_embedding_approval
 from .graph_repository import GraphRepository
+from .image_processing import InvalidChatImage, sanitize_chat_image
 from .knowledge import KnowledgeIndex
 from .language import detect_language
 from .legal import agreement_markdown, agreement_markdown_ar
@@ -115,6 +114,32 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(ProjectCreate):
     pass
 
+class ClarificationSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interaction_id: str = Field(min_length=8, max_length=80)
+    answers: dict[str, str | list[str]] = Field(min_length=1, max_length=3)
+
+    @field_validator("answers")
+    @classmethod
+    def validate_answers(
+        cls, answers: dict[str, str | list[str]]
+    ) -> dict[str, str | list[str]]:
+        cleaned: dict[str, str | list[str]] = {}
+        for question_id, raw in answers.items():
+            key = question_id.strip()
+            if not key or len(key) > 40:
+                raise ValueError("Invalid clarification question ID")
+            values = raw if isinstance(raw, list) else [raw]
+            normalized = [str(value).strip()[:500] for value in values]
+            normalized = [value for value in normalized if value]
+            if not normalized or len(normalized) > 6:
+                raise ValueError("Each clarification answer must contain 1-6 values")
+            cleaned[key] = normalized if isinstance(raw, list) else normalized[0]
+        return cleaned
+
+
+
 
 class TurnRequest(BaseModel):
     conversation_id: str
@@ -123,6 +148,7 @@ class TurnRequest(BaseModel):
     model_id: str | None = None
     clarification_style: str = "auto"
     attachment_ids: list[str] = Field(default_factory=list, max_length=1)
+    clarification_response: ClarificationSubmission | None = None
 
 
 class FeedbackRequest(BaseModel):
@@ -156,9 +182,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     retrieval = None
     rag_backend = os.getenv("RAG_BACKEND", "postgres").strip().lower()
     if rag_backend not in {"legacy", "postgres", "qdrant"}:
-        raise RuntimeError(
-            "RAG_BACKEND must be one of legacy, postgres, or qdrant"
-        )
+        raise RuntimeError("RAG_BACKEND must be one of legacy, postgres, or qdrant")
     if store.is_postgres and rag_backend != "legacy":
         vector_approved = (
             os.getenv("RAG_VECTOR_BENCHMARK_APPROVED", "false").lower() == "true"
@@ -217,9 +241,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 GraphRepository(store._connect),
                 QdrantProjectionRepository(store._connect),
                 retrieval,
-                deployment_scope=(
-                    "production" if APP_ENV == "production" else "pilot"
-                ),
+                deployment_scope=("production" if APP_ENV == "production" else "pilot"),
                 config=ProjectionConfig.from_env(),
             )
     pipeline = AssistantEngine(knowledge, provider=provider, retrieval=retrieval)
@@ -271,8 +293,12 @@ async def security_headers(request: Request, call_next: Any) -> Any:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; frame-ancestors 'none'"
+    )
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains"
+    )
     response.headers["Server-Timing"] = (
         f"api;dur={(time.perf_counter() - started) * 1000:.1f}"
     )
@@ -308,7 +334,9 @@ async def current_user(
 
 def _require_consent(services: WebServices, user: CurrentUser) -> None:
     if not services.store.has_current_consent(user.id):
-        raise HTTPException(status_code=428, detail="User agreement acceptance required")
+        raise HTTPException(
+            status_code=428, detail="User agreement acceptance required"
+        )
 
 
 def _sse(event: str, data: dict[str, Any]) -> bytes:
@@ -383,8 +411,6 @@ async def healthz(request: Request) -> dict[str, Any]:
     if result["rag_backend"] == "qdrant" and not result["qdrant_reachable"]:
         result["projection_status"] = "unreachable_fallback_ready"
     return result
-
-
 
 
 @app.get("/v1/config")
@@ -477,9 +503,7 @@ async def list_projects(
 ) -> dict[str, Any]:
     services = _services(request)
     _require_consent(services, user)
-    return {
-        "items": await asyncio.to_thread(services.store.list_projects, user.id)
-    }
+    return {"items": await asyncio.to_thread(services.store.list_projects, user.id)}
 
 
 @app.post("/v1/projects", status_code=201)
@@ -497,9 +521,7 @@ async def create_project(
             payload.name,
             instructions=payload.instructions,
         )
-        return await asyncio.to_thread(
-            services.store.get_project, user.id, project_id
-        )
+        return await asyncio.to_thread(services.store.get_project, user.id, project_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -521,9 +543,7 @@ async def update_project(
             name=payload.name,
             instructions=payload.instructions,
         )
-        return await asyncio.to_thread(
-            services.store.get_project, user.id, project_id
-        )
+        return await asyncio.to_thread(services.store.get_project, user.id, project_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -604,12 +624,12 @@ async def download_project_document(
             services.store.list_documents, user.id, project_id
         )
         document = next(item for item in documents if item["id"] == document_id)
-        data = await asyncio.to_thread(
-            services.storage.get, document["storage_path"]
-        )
+        data = await asyncio.to_thread(services.storage.get, document["storage_path"])
     except (ValueError, StopIteration, FileNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Document not found") from exc
-    filename = str(document["filename"]).replace('"', "").replace("\r", "").replace("\n", "")
+    filename = (
+        str(document["filename"]).replace('"', "").replace("\r", "").replace("\n", "")
+    )
     return Response(
         content=data,
         media_type=str(document["mime_type"]),
@@ -617,9 +637,7 @@ async def download_project_document(
     )
 
 
-@app.delete(
-    "/v1/projects/{project_id}/documents/{document_id}", status_code=204
-)
+@app.delete("/v1/projects/{project_id}/documents/{document_id}", status_code=204)
 async def delete_project_document(
     project_id: str,
     document_id: str,
@@ -671,12 +689,12 @@ async def download_artifact(
         artifact = await asyncio.to_thread(
             services.store.get_artifact, user.id, artifact_id
         )
-        data = await asyncio.to_thread(
-            services.storage.get, artifact["storage_path"]
-        )
+        data = await asyncio.to_thread(services.storage.get, artifact["storage_path"])
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Artifact not found") from exc
-    filename = str(artifact["filename"]).replace('"', "").replace("\r", "").replace("\n", "")
+    filename = (
+        str(artifact["filename"]).replace('"', "").replace("\r", "").replace("\n", "")
+    )
     return Response(
         content=data,
         media_type=str(artifact["mime_type"]),
@@ -789,6 +807,10 @@ async def delete_conversation(
     services = _services(request)
     _require_consent(services, user)
     try:
+        await asyncio.to_thread(
+            services.store.get_conversation, user.id, conversation_id
+        )
+        await services.pipeline.clarification.delete(user.id, conversation_id)
         paths = await asyncio.to_thread(
             services.store.delete_conversation, user.id, conversation_id
         )
@@ -832,42 +854,21 @@ async def upload_image(
     services = _services(request)
     _require_consent(services, user)
     supplied_mime = (image.content_type or "").split(";", 1)[0].lower()
-    if supplied_mime not in {"image/jpeg", "image/png"}:
-        raise HTTPException(status_code=415, detail="Only JPG and PNG are accepted")
     data = await image.read(MAX_CHAT_IMAGE_BYTES + 1)
     if not data or len(data) > MAX_CHAT_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image must be under 5 MB")
     try:
-        with Image.open(io.BytesIO(data)) as opened:
-            opened.load()
-            if opened.width > 12000 or opened.height > 12000:
-                raise ValueError("Image dimensions are too large")
-            cleaned = ImageOps.exif_transpose(opened)
-            output = io.BytesIO()
-            has_alpha = cleaned.mode in {"RGBA", "LA"} or (
-                cleaned.mode == "P" and "transparency" in cleaned.info
-            )
-            if supplied_mime == "image/png" and has_alpha:
-                cleaned.convert("RGBA").save(
-                    output, format="PNG", optimize=True
-                )
-                stored_mime = "image/png"
-                extension = "png"
-            else:
-                cleaned.convert("RGB").save(
-                    output, format="JPEG", quality=88, optimize=True
-                )
-                stored_mime = "image/jpeg"
-                extension = "jpg"
-            sanitized = output.getvalue()
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
-        raise HTTPException(status_code=422, detail="Image is invalid or unsafe") from exc
+        normalized = sanitize_chat_image(data, supplied_mime)
+    except InvalidChatImage as exc:
+        status = 415 if supplied_mime not in {"image/jpeg", "image/png"} else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    sanitized = normalized.data
+    stored_mime = normalized.mime_type
+    extension = normalized.extension
 
     object_id = str(uuid.uuid4())
     storage_path = f"users/{user.id}/chat-images/{object_id}.{extension}"
-    await asyncio.to_thread(
-        services.storage.put, storage_path, sanitized, stored_mime
-    )
+    await asyncio.to_thread(services.storage.put, storage_path, sanitized, stored_mime)
     expires_at = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
     try:
         upload_id = await asyncio.to_thread(
@@ -930,6 +931,12 @@ async def delete_account(
     services = _services(request)
     paths = await asyncio.to_thread(services.store.user_storage_paths, user.id)
     await asyncio.to_thread(_delete_paths, services.storage, paths)
+    conversation_ids = await asyncio.to_thread(
+        services.store.list_conversation_ids, user.id
+    )
+    for conversation_id in conversation_ids:
+        await services.pipeline.clarification.delete(user.id, conversation_id)
+
     await asyncio.to_thread(services.store.delete_user_records, user.id)
     await services.auth.delete_user(user.identity.auth_user_id)
 
@@ -1019,9 +1026,7 @@ async def get_turn_status(
     services = _services(request)
     _require_consent(services, user)
     try:
-        state = await asyncio.to_thread(
-            services.coordinator.status, user.id, turn_id
-        )
+        state = await asyncio.to_thread(services.coordinator.status, user.id, turn_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if state["terminal"] and state.get("error"):
@@ -1068,6 +1073,10 @@ async def create_turn(
         text=payload.text,
         attachment_references=attachment_references,
         mode=payload.mode,
+        clarification_response=(
+            payload.clarification_response.model_dump(mode="json")
+            if payload.clarification_response else None
+        ),
         model_id=payload.model_id,
         clarification_style=payload.clarification_style,
     )
@@ -1076,9 +1085,7 @@ async def create_turn(
     except IdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if replay:
-        return _streaming_response(
-            _replay_turn_stream(services, user.id, replay)
-        )
+        return _streaming_response(_replay_turn_stream(services, user.id, replay))
 
     history_records = await asyncio.to_thread(
         services.store.list_messages,
@@ -1098,9 +1105,7 @@ async def create_turn(
             upload = await asyncio.to_thread(
                 services.store.get_upload, user.id, upload_id
             )
-            data = await asyncio.to_thread(
-                services.storage.get, upload["storage_path"]
-            )
+            data = await asyncio.to_thread(services.storage.get, upload["storage_path"])
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         encoded = base64.b64encode(data).decode("ascii")
@@ -1140,6 +1145,10 @@ async def create_turn(
         attachments=tuple(model_attachments),
         attachment_references=attachment_references,
         mode=payload.mode,
+        clarification_response=(
+            payload.clarification_response.model_dump(mode="json")
+            if payload.clarification_response else None
+        ),
         model_id=payload.model_id,
         clarification_style=payload.clarification_style,
         project_instructions=project_instructions,
@@ -1181,9 +1190,7 @@ async def create_turn(
             headers={"Retry-After": "3"},
         )
     if reservation.existing:
-        return _streaming_response(
-            _replay_turn_stream(services, user.id, reservation)
-        )
+        return _streaming_response(_replay_turn_stream(services, user.id, reservation))
     turn_id = str(reservation.turn_id)
     for upload_id in payload.attachment_ids[:1]:
         await asyncio.to_thread(services.store.consume_upload, user.id, upload_id)
@@ -1302,7 +1309,9 @@ async def create_turn(
 
 
 class ReleaseActionBody(BaseModel):
-    deployment_scope: str = Field(default="pilot", pattern="^(internal|pilot|production)$")
+    deployment_scope: str = Field(
+        default="pilot", pattern="^(internal|pilot|production)$"
+    )
 
 
 class EditorAssignmentBody(BaseModel):
@@ -1330,7 +1339,9 @@ def _require_admin(user: CurrentUser) -> None:
 
 def _require_postgres_store(services: WebServices) -> None:
     if not services.store.is_postgres:
-        raise HTTPException(status_code=503, detail="Knowledge administration requires PostgreSQL")
+        raise HTTPException(
+            status_code=503, detail="Knowledge administration requires PostgreSQL"
+        )
 
 
 def _is_editor(services: WebServices, user: CurrentUser) -> bool:
@@ -1353,7 +1364,9 @@ async def _activate_qdrant_aliases(
         QdrantProjectionRepository(services.store._connect).projection, release_id
     )
     if not projection or projection.get("state") != "ready":
-        raise HTTPException(status_code=409, detail="Release has no ready Qdrant projection")
+        raise HTTPException(
+            status_code=409, detail="Release has no ready Qdrant projection"
+        )
     manifest = ProjectionManifest(
         release_id=release_id,
         evidence_collection=str(projection["evidence_collection"]),
@@ -1449,7 +1462,9 @@ async def admin_rollback_release(
             (body.deployment_scope,),
         ).fetchone()
         if not current:
-            raise HTTPException(status_code=409, detail="No active release to roll back")
+            raise HTTPException(
+                status_code=409, detail="No active release to roll back"
+            )
         target = connection.execute(
             """
             SELECT previous_release_id FROM knowledge_release_activations
@@ -1517,7 +1532,9 @@ async def admin_assign_editor(
     services = _services(request)
     _require_postgres_store(services)
     with services.store._connect() as connection:
-        row = connection.execute("SELECT id FROM users WHERE id=%s", (body.user_id,)).fetchone()
+        row = connection.execute(
+            "SELECT id FROM users WHERE id=%s", (body.user_id,)
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
         connection.execute(
@@ -1574,7 +1591,9 @@ async def editor_create_proposal(
 async def editor_list_proposals(
     request: Request,
     user: Annotated[CurrentUser, Depends(current_user)],
-    state: str | None = Query(default=None, pattern="^(proposed|accepted|rejected|superseded)$"),
+    state: str | None = Query(
+        default=None, pattern="^(proposed|accepted|rejected|superseded)$"
+    ),
 ) -> dict[str, Any]:
     services = _services(request)
     _require_postgres_store(services)
@@ -1629,7 +1648,5 @@ async def admin_review_proposal(
             ),
         )
         if cursor.rowcount != 1:
-            raise HTTPException(
-                status_code=409, detail="Proposal is not reviewable"
-            )
+            raise HTTPException(status_code=409, detail="Proposal is not reviewable")
     return {"proposal_id": proposal_id, "state": body.state}

@@ -219,6 +219,7 @@ class PilotStore:
                     tools_json TEXT NOT NULL DEFAULT '[]',
                     artifacts_json TEXT NOT NULL DEFAULT '[]',
                     attachments_json TEXT NOT NULL DEFAULT '[]',
+                    interaction_json TEXT NOT NULL DEFAULT '{}',
                     warning TEXT,
                     created_at TEXT NOT NULL
                 );
@@ -376,8 +377,7 @@ class PilotStore:
             )
 
         query_columns = {
-            row["name"]
-            for row in connection.execute("PRAGMA table_info(query_events)")
+            row["name"] for row in connection.execute("PRAGMA table_info(query_events)")
         }
         additions = {
             "request_id": "TEXT",
@@ -412,6 +412,14 @@ class PilotStore:
                 connection.execute(
                     f"ALTER TABLE assistant_turns ADD COLUMN {name} {definition}"
                 )
+        message_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(messages)")
+        }
+        if "interaction_json" not in message_columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN interaction_json "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_turns_request "
             "ON assistant_turns(owner_user_id, request_id) "
@@ -1003,6 +1011,18 @@ class PilotStore:
             rows = connection.execute(self._sql(query), parameters).fetchall()
         return [dict(row) for row in rows]
 
+    def list_conversation_ids(self, owner_user_id: str) -> list[str]:
+        """Return every owned conversation ID for privacy-state cleanup."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                self._sql(
+                    "SELECT id FROM conversations WHERE owner_user_id = ? ORDER BY id"
+                ),
+                (owner_user_id,),
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def get_conversation(
         self,
         owner_user_id: str,
@@ -1130,6 +1150,7 @@ class PilotStore:
         tools: list[str] | None = None,
         artifact_ids: list[str] | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        interaction: dict[str, Any] | None = None,
         warning: str | None = None,
     ) -> str:
         if role not in {"user", "assistant", "system"}:
@@ -1144,8 +1165,8 @@ class PilotStore:
                     INSERT INTO messages
                         (id, conversation_id, role, content, language, mode, model,
                          status, citations_json, tools_json, artifacts_json,
-                         attachments_json, warning, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         attachments_json, interaction_json, warning, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -1161,6 +1182,7 @@ class PilotStore:
                     json.dumps(tools or [], ensure_ascii=False),
                     json.dumps(artifact_ids or [], ensure_ascii=False),
                     json.dumps(attachments or [], ensure_ascii=False),
+                    json.dumps(interaction or {}, ensure_ascii=False),
                     warning,
                     now,
                 ),
@@ -1220,6 +1242,12 @@ class PilotStore:
                 ("attachments_json", "attachments"),
             ):
                 item[target] = json.loads(item.pop(source) or "[]")
+            interaction = item.pop("interaction_json") or {}
+            item["interaction"] = (
+                interaction
+                if isinstance(interaction, dict)
+                else json.loads(interaction)
+            )
             messages.append(item)
         return messages
 
@@ -1576,9 +1604,7 @@ class PilotStore:
             ),
         )
 
-    def get_assistant_turn(
-        self, owner_user_id: str, turn_id: str
-    ) -> dict[str, Any]:
+    def get_assistant_turn(self, owner_user_id: str, turn_id: str) -> dict[str, Any]:
         """Return owner-filtered persisted turn state for stream recovery."""
 
         with self._connect() as connection:
@@ -1590,6 +1616,7 @@ class PilotStore:
                            m.model AS message_model, m.status AS message_status,
                            m.citations_json, m.tools_json, m.artifacts_json,
                            m.attachments_json, m.warning AS message_warning,
+                           m.interaction_json,
                            m.created_at AS message_created_at
                     FROM assistant_turns t
                     LEFT JOIN messages m ON m.id = t.assistant_message_id
@@ -1615,6 +1642,11 @@ class PilotStore:
                 "tools": json.loads(item.get("tools_json") or "[]"),
                 "artifact_ids": json.loads(item.get("artifacts_json") or "[]"),
                 "attachments": json.loads(item.get("attachments_json") or "[]"),
+                "interaction": (
+                    item.get("interaction_json")
+                    if isinstance(item.get("interaction_json"), dict)
+                    else json.loads(item.get("interaction_json") or "{}")
+                ),
                 "warning": item.get("message_warning"),
                 "created_at": item.get("message_created_at"),
             }
@@ -1715,6 +1747,7 @@ class PilotStore:
         estimated_cost_usd: float | None,
         provider_calls: list[dict[str, Any]],
         terminal_sequence: int,
+        interaction: dict[str, Any] | None = None,
     ) -> str:
         """Persist one terminal message, exact query accounting, and provider calls."""
 
@@ -1753,8 +1786,8 @@ class PilotStore:
                     INSERT INTO messages
                         (id, conversation_id, role, content, language, mode, model,
                          status, citations_json, tools_json, artifacts_json,
-                         attachments_json, warning, created_at)
-                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)
+                         attachments_json, interaction_json, warning, created_at)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)
                     """
                 ),
                 (
@@ -1768,6 +1801,7 @@ class PilotStore:
                     json.dumps(citations, ensure_ascii=False),
                     json.dumps(tools, ensure_ascii=False),
                     json.dumps(artifact_ids, ensure_ascii=False),
+                    json.dumps(interaction or {}, ensure_ascii=False),
                     warning,
                     now,
                 ),
@@ -1906,7 +1940,14 @@ class PilotStore:
                       )
                     """
                 ),
-                (status, error_type, int(terminal_sequence), now, turn_id, owner_user_id),
+                (
+                    status,
+                    error_type,
+                    int(terminal_sequence),
+                    now,
+                    turn_id,
+                    owner_user_id,
+                ),
             )
             if cursor.rowcount != 1:
                 raise TurnStateConflict(
@@ -2138,9 +2179,7 @@ class PilotStore:
         artifact = self.get_artifact(owner_user_id, artifact_id)
         with self._connect() as connection:
             cursor = connection.execute(
-                self._sql(
-                    "DELETE FROM artifacts WHERE id = ? AND owner_user_id = ?"
-                ),
+                self._sql("DELETE FROM artifacts WHERE id = ? AND owner_user_id = ?"),
                 (artifact_id, owner_user_id),
             )
             if cursor.rowcount != 1:

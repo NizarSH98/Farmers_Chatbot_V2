@@ -52,6 +52,8 @@ import type {
   AppConfig,
   Artifact,
   Citation,
+  ClarificationQuestion,
+  ClarificationInteraction,
   Conversation,
   CurrentUser,
   Language,
@@ -70,6 +72,13 @@ type DialogState =
   | { kind: "delete-account" }
   | null;
 
+interface SettingsDraft {
+  language: Language;
+  mode: string;
+  modelId: string;
+  clarificationStyle: string;
+}
+
 const initialConfig: AppConfig = {
   app_name: "RAISE",
   agreement_version: "",
@@ -77,6 +86,21 @@ const initialConfig: AppConfig = {
   modes: [],
   models: []
 };
+
+function clarificationQuestions(
+  interaction: ClarificationInteraction
+): ClarificationQuestion[] {
+  if (interaction.questions?.length) return interaction.questions;
+  return [{
+    id: "detail",
+    prompt: interaction.question,
+    answer_type: "single",
+    required: true,
+    allow_other: false,
+    options: interaction.options || []
+  }];
+}
+
 
 export function ChatWorkspace() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -100,6 +124,12 @@ export function ChatWorkspace() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>({
+    language: "ar",
+    mode: "standard",
+    modelId: "",
+    clarificationStyle: "auto"
+  });
   const [agreement, setAgreement] = useState("");
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [corpusWarningVisible, setCorpusWarningVisible] = useState(false);
@@ -121,11 +151,16 @@ export function ChatWorkspace() {
   const [projectName, setProjectName] = useState("");
   const [projectInstructions, setProjectInstructions] = useState("");
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
+  const [clarificationAnswers, setClarificationAnswers] = useState<
+    Record<string, Record<string, string | string[]>>
+  >({});
+  const [customAnswerFor, setCustomAnswerFor] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const documentRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const localPreviewUrls = useRef(new Set<string>());
 
   const token = LOCAL_AUTH ? "local-development" : session?.access_token || "";
   const rtl = language === "ar";
@@ -133,6 +168,18 @@ export function ChatWorkspace() {
     (key: Parameters<typeof t>[1]) => t(language, key),
     [language]
   );
+  const pendingClarificationId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role === "user") return "";
+      if (
+        message.role === "assistant" &&
+        message.status === "clarification" &&
+        message.interaction?.status !== "resolved"
+      ) return message.id;
+    }
+    return "";
+  }, [messages]);
 
   useEffect(() => {
     if (LOCAL_AUTH) {
@@ -161,6 +208,11 @@ export function ChatWorkspace() {
     document.documentElement.dir = rtl ? "rtl" : "ltr";
     localStorage.setItem("raise-language", language);
   }, [language, rtl]);
+
+  useEffect(() => () => {
+    localPreviewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    localPreviewUrls.current.clear();
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -314,16 +366,37 @@ export function ChatWorkspace() {
     setError("");
   };
 
+  const openSettings = () => {
+    setSettingsDraft({ language, mode, modelId, clarificationStyle });
+    setSettingsOpen(true);
+  };
+
+  const closeSettings = () => setSettingsOpen(false);
+
+  const saveSettings = () => {
+    setLanguage(settingsDraft.language);
+    setMode(settingsDraft.mode);
+    setModelId(settingsDraft.modelId);
+    setClarificationStyle(settingsDraft.clarificationStyle);
+    localStorage.setItem("raise-model", settingsDraft.modelId);
+    setSettingsOpen(false);
+  };
+
   const handleImage = async (file?: File) => {
     if (!file || !token) return;
     setUploading(true);
     setError("");
     try {
       const uploaded = await uploadImage(file, token);
-      if (imagePreview) URL.revokeObjectURL(imagePreview);
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+        localPreviewUrls.current.delete(imagePreview);
+      }
+      const previewUrl = URL.createObjectURL(file);
+      localPreviewUrls.current.add(previewUrl);
       setImageFile(file);
       setImageId(uploaded.id);
-      setImagePreview(URL.createObjectURL(file));
+      setImagePreview(previewUrl);
     } catch {
       setError(text("uploadError"));
     } finally {
@@ -333,7 +406,10 @@ export function ChatWorkspace() {
   };
 
   const removeImage = () => {
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+      localPreviewUrls.current.delete(imagePreview);
+    }
     setImageFile(null);
     setImageId("");
     setImagePreview("");
@@ -351,9 +427,13 @@ export function ChatWorkspace() {
     ));
   };
 
-  const submit = async (override?: string) => {
+  const submit = async (
+    override?: string,
+    clarificationResponse?: TurnPayload["clarification_response"]
+  ) => {
     if (!token || sending) return;
-    const question = (override ?? composer).trim();
+    const typedQuestion = (override ?? composer).trim();
+    const question = typedQuestion || (imageId ? text("imageQuestion") : "");
     if (!question) return;
     setError("");
     setSending(true);
@@ -366,6 +446,10 @@ export function ChatWorkspace() {
       const userId = crypto.randomUUID();
       assistantId = crypto.randomUUID();
       const now = new Date().toISOString();
+      const submittedImagePreview = imageFile ? URL.createObjectURL(imageFile) : "";
+      if (submittedImagePreview) {
+        localPreviewUrls.current.add(submittedImagePreview);
+      }
       const optimisticUser: Message = {
         id: userId,
         role: "user",
@@ -373,7 +457,12 @@ export function ChatWorkspace() {
         status: "complete",
         citations: [],
         tools: [],
-        attachments: imageFile ? [{ kind: "image", mime_type: imageFile.type }] : [],
+        attachments: imageFile ? [{
+          kind: "image",
+          mime_type: imageFile.type,
+          name: imageFile.name,
+          preview_url: submittedImagePreview
+        }] : [],
         created_at: now
       };
       const optimisticAssistant: Message = {
@@ -388,7 +477,18 @@ export function ChatWorkspace() {
         created_at: now,
         pending: true
       };
-      setMessages((items) => [...items, optimisticUser, optimisticAssistant]);
+      setMessages((items) => [
+        ...items.map((item) => (
+          clarificationResponse && item.id === pendingClarificationId && item.interaction
+            ? {
+                ...item,
+                interaction: { ...item.interaction, status: "resolved" as const }
+              }
+            : item
+        )),
+        optimisticUser,
+        optimisticAssistant
+      ]);
       setComposer("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       const controller = new AbortController();
@@ -399,7 +499,8 @@ export function ChatWorkspace() {
         mode,
         model_id: modelId || undefined,
         clarification_style: clarificationStyle,
-        attachment_ids: imageId ? [imageId] : []
+        attachment_ids: imageId ? [imageId] : [],
+        ...(clarificationResponse ? { clarification_response: clarificationResponse } : {})
       };
       for await (const event of streamTurn(payload, token, controller.signal)) {
         if (event.event === "status") {
@@ -414,11 +515,14 @@ export function ChatWorkspace() {
         } else if (event.event === "content.delta") {
           appendPending(assistantId, String(event.data.text || ""));
         } else if (event.event === "clarification") {
-          const options = Array.isArray(event.data.options) ? event.data.options.map(String) : [];
+          const interaction = event.data.interaction && typeof event.data.interaction === "object"
+            ? event.data.interaction as ClarificationInteraction
+            : undefined;
           patchPending(assistantId, {
             content: String(event.data.content || ""),
             status: "clarification",
-            quickReplies: options.length > 0 ? options : undefined
+            quickReplies: undefined,
+            interaction
           });
         } else if (event.event === "warning") {
           patchPending(assistantId, { warning: String(event.data.message || "") });
@@ -440,7 +544,14 @@ export function ChatWorkspace() {
           throw new Error(String(event.data.message || text("error")));
         }
       }
-      removeImage();
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+        localPreviewUrls.current.delete(imagePreview);
+      }
+      setImageFile(null);
+      setImageId("");
+      setImagePreview("");
+      if (fileRef.current) fileRef.current.value = "";
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") {
         setMessages((items) => items.map((item) =>
@@ -755,6 +866,71 @@ export function ChatWorkspace() {
       ? text("verification")
       : text("analyzing");
 
+  const clarificationIsComplete = (message: Message): boolean => {
+    if (!message.interaction) return false;
+    const answers = clarificationAnswers[message.id] || {};
+    return clarificationQuestions(message.interaction).every((question) => {
+      if (!question.required) return true;
+      const answer = answers[question.id];
+      return Array.isArray(answer)
+        ? answer.some((value) => value.trim())
+        : Boolean(String(answer || "").trim());
+    });
+  };
+
+
+  const setClarificationAnswer = (
+    messageId: string,
+    questionId: string,
+    value: string,
+    multiple: boolean
+  ) => {
+    setClarificationAnswers((current) => {
+      const form = current[messageId] || {};
+      if (!multiple) {
+        return { ...current, [messageId]: { ...form, [questionId]: value } };
+      }
+      const previous = Array.isArray(form[questionId]) ? form[questionId] as string[] : [];
+      const selected = previous.includes(value)
+        ? previous.filter((item) => item !== value)
+        : [...previous, value];
+      return { ...current, [messageId]: { ...form, [questionId]: selected } };
+    });
+  };
+
+  const submitClarification = (message: Message) => {
+    const interaction = message.interaction;
+    if (!interaction) return;
+    const questions = clarificationQuestions(interaction);
+    const answers = clarificationAnswers[message.id] || {};
+    const complete = questions.every((question) => (
+      !question.required ||
+      (Array.isArray(answers[question.id])
+        ? (answers[question.id] as string[]).some((value) => value.trim())
+        : Boolean(String(answers[question.id] || "").trim()))
+    ));
+    if (!complete) return;
+    const summary = questions.map((question) => {
+      const raw = answers[question.id];
+      const answer = Array.isArray(raw) ? raw.join(", ") : String(raw || "");
+      return question.prompt + ": " + answer;
+    }).join("\n");
+    const response = interaction.interaction_id
+      ? {
+          interaction_id: interaction.interaction_id,
+          answers
+        }
+      : undefined;
+    setCustomAnswerFor("");
+    setClarificationAnswers((current) => {
+      const next = { ...current };
+      delete next[message.id];
+      return next;
+    });
+    void submit(summary, response);
+  };
+
+
   if (loading) {
     return (
       <main className="center-page" dir={rtl ? "rtl" : "ltr"}>
@@ -946,7 +1122,7 @@ export function ChatWorkspace() {
             <button
               aria-label={text("settings")}
               className="icon-button"
-              onClick={() => setSettingsOpen(true)}
+              onClick={openSettings}
               type="button"
             >
               <Settings />
@@ -1006,9 +1182,16 @@ export function ChatWorkspace() {
                     {message.role === "assistant" ? <Leaf /> : (profile?.name || "U").slice(0, 1)}
                   </div>
                   <div className="message-body">
-                    {message.attachments.some((item) => item.kind === "image") && (
-                      <span className="attachment-chip"><ImagePlus />{text("imageReady")}</span>
-                    )}
+                    {message.attachments.filter((item) => item.kind === "image").map((attachment, attachmentIndex) => (
+                      <div className="message-image-attachment" key={(attachment.storage_path || attachment.name || "image") + attachmentIndex}>
+                        {attachment.preview_url ? (
+                          <img alt={attachment.name || text("imageAttached")} src={attachment.preview_url} />
+                        ) : (
+                          <ImagePlus aria-hidden="true" />
+                        )}
+                        <span>{attachment.name || text("imageAttached")}</span>
+                      </div>
+                    ))}
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {message.content || (message.pending ? stageLabel : "")}
@@ -1053,8 +1236,9 @@ export function ChatWorkspace() {
                         ))}
                       </div>
                     )}
-                    {message.quickReplies && message.quickReplies.length > 0 && !sending && (
-                      <div className="quick-replies">
+                    {message.quickReplies && message.quickReplies.length > 0 &&
+                      message.status !== "clarification" && !sending && (
+                      <div className="quick-replies follow-up-replies">
                         {message.quickReplies.map((reply, replyIndex) => (
                           <button
                             key={replyIndex}
@@ -1066,6 +1250,101 @@ export function ChatWorkspace() {
                             {reply}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {message.interaction && message.status === "clarification" && (
+                      <div
+                        className={"clarification-form " + (
+                          pendingClarificationId === message.id ? "active" : "resolved"
+                        )}
+                      >
+                        {clarificationQuestions(message.interaction).map((question, questionIndex) => {
+                          const formAnswers = clarificationAnswers[message.id] || {};
+                          const answer = formAnswers[question.id];
+                          const customKey = message.id + ":" + question.id;
+                          const options = [
+                            ...question.options,
+                            ...(question.allow_other ? [{
+                              id: question.id + "_other",
+                              label: text("somethingElse"),
+                              value: "",
+                              kind: "other" as const
+                            }] : [])
+                          ];
+                          return (
+                            <fieldset key={question.id} disabled={pendingClarificationId !== message.id || sending}>
+                              <legend>
+                                <span>{questionIndex + 1}</span>
+                                {question.prompt}
+                              </legend>
+                              {question.answer_type !== "text" && (
+                                <div className="clarification-options">
+                                  {options.map((option, optionIndex) => {
+                                    const selected = option.kind !== "other" && (
+                                      Array.isArray(answer)
+                                        ? answer.includes(option.value)
+                                        : answer === option.value
+                                    );
+                                    const otherSelected = option.kind === "other" &&
+                                      customAnswerFor === customKey;
+                                    return (
+                                      <button
+                                        aria-pressed={selected || otherSelected}
+                                        className={"quick-reply-btn " + (
+                                          selected || otherSelected ? "selected" : ""
+                                        )}
+                                        key={option.id}
+                                        onClick={() => {
+                                          if (option.kind === "other") {
+                                            setCustomAnswerFor(customKey);
+                                          } else {
+                                            if (customAnswerFor === customKey) {
+                                              setCustomAnswerFor("");
+                                            }
+                                            setClarificationAnswer(
+                                              message.id,
+                                              question.id,
+                                              option.value,
+                                              question.answer_type === "multiple"
+                                            );
+                                          }
+                                        }}
+                                        type="button"
+                                      >
+                                        <span className="quick-reply-number">{optionIndex + 1}</span>
+                                        {option.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {(question.answer_type === "text" || customAnswerFor === customKey) && (
+                                <input
+                                  autoFocus={customAnswerFor === customKey}
+                                  className="clarification-text-answer"
+                                  onChange={(event) => setClarificationAnswer(
+                                    message.id,
+                                    question.id,
+                                    event.target.value,
+                                    false
+                                  )}
+                                  placeholder={text("typeOwnOption")}
+                                  value={Array.isArray(answer) ? answer.join(", ") : String(answer || "")}
+                                />
+                              )}
+                            </fieldset>
+                          );
+                        })}
+                        {pendingClarificationId === message.id && (
+                          <button
+                            className="clarification-submit"
+                            disabled={!clarificationIsComplete(message) || sending}
+                            onClick={() => submitClarification(message)}
+                            type="button"
+                          >
+                            <Send />{text("submitAnswers")}
+                          </button>
+                        )}
                       </div>
                     )}
                     {message.role === "assistant" && message.content && (
@@ -1113,10 +1392,9 @@ export function ChatWorkspace() {
         <footer className="composer-area">
           {imagePreview && (
             <div className="image-preview">
-              <img alt={imageFile?.name || text("imageReady")} src={imagePreview} />
+              <img alt={imageFile?.name || text("imageAttached")} src={imagePreview} />
               <div>
                 <strong>{imageFile?.name}</strong>
-                <span>{text("imageReady")}</span>
               </div>
               <button aria-label={text("delete")} onClick={removeImage} type="button"><X /></button>
             </div>
@@ -1165,15 +1443,21 @@ export function ChatWorkspace() {
               >
                 <ImagePlus />
               </button>
-              <button
-                className="mode-pill"
-                onClick={() => setSettingsOpen(true)}
-                type="button"
-              >
-                {config.modes.find((item) => item.id === mode)?.[
-                  rtl ? "label_ar" : "label_en"
-                ] || mode}
-              </button>
+              <div className="composer-mode-select">
+                <select
+                  aria-label={text("mode")}
+                  disabled={sending}
+                  onChange={(event) => setMode(event.target.value)}
+                  value={mode}
+                >
+                  {config.modes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {rtl ? item.label_ar : item.label_en}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </div>
               <span className="composer-spacer" />
               {sending ? (
                 <button
@@ -1188,7 +1472,7 @@ export function ChatWorkspace() {
                 <button
                   aria-label={text("send")}
                   className="send-button"
-                  disabled={!composer.trim() || uploading}
+                  disabled={(!composer.trim() && !imageId) || uploading}
                   onClick={() => void submit()}
                   type="button"
                 >
@@ -1381,7 +1665,7 @@ export function ChatWorkspace() {
       )}
 
       {settingsOpen && (
-        <div className="modal-layer" onMouseDown={() => setSettingsOpen(false)} role="presentation">
+        <div className="modal-layer" onMouseDown={closeSettings} role="presentation">
           <section
             aria-labelledby="settings-title"
             aria-modal="true"
@@ -1391,51 +1675,60 @@ export function ChatWorkspace() {
           >
             <div className="modal-header">
               <h2 id="settings-title">{text("settings")}</h2>
-              <button aria-label={text("close")} className="icon-button" onClick={() => setSettingsOpen(false)} type="button">
+              <button aria-label={text("close")} className="icon-button" onClick={closeSettings} type="button">
                 <X />
               </button>
             </div>
             <div className="settings-section">
               <label>{text("language")}</label>
               <div className="segmented-control">
-                <button className={rtl ? "selected" : ""} onClick={() => setLanguage("ar")} type="button">
+                <button className={settingsDraft.language === "ar" ? "selected" : ""} onClick={() => setSettingsDraft((draft) => ({ ...draft, language: "ar" }))} type="button">
                   العربية
                 </button>
-                <button className={!rtl ? "selected" : ""} onClick={() => setLanguage("en")} type="button">
+                <button className={settingsDraft.language === "en" ? "selected" : ""} onClick={() => setSettingsDraft((draft) => ({ ...draft, language: "en" }))} type="button">
                   English
                 </button>
               </div>
             </div>
             <div className="settings-section">
               <label htmlFor="mode-select">{text("mode")}</label>
-              <select id="mode-select" onChange={(event) => setMode(event.target.value)} value={mode}>
-                {config.modes.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {rtl ? item.label_ar : item.label_en}
-                  </option>
-                ))}
-              </select>
+              <div className="select-control">
+                <select id="mode-select" onChange={(event) => setSettingsDraft((draft) => ({ ...draft, mode: event.target.value }))} value={settingsDraft.mode}>
+                  {config.modes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {settingsDraft.language === "ar" ? item.label_ar : item.label_en}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </div>
             </div>
             <div className="settings-section">
               <label htmlFor="model-select">{text("model")}</label>
-              <select id="model-select" onChange={(event) => { setModelId(event.target.value); localStorage.setItem("raise-model", event.target.value); }} value={modelId}>
-                {config.models.map((item) => (
-                  <option key={item.id} value={item.id}>{item.label}</option>
-                ))}
-              </select>
-              <small>{config.models.find((item) => item.id === modelId)?.description}</small>
+              <div className="select-control">
+                <select id="model-select" onChange={(event) => setSettingsDraft((draft) => ({ ...draft, modelId: event.target.value }))} value={settingsDraft.modelId}>
+                  {config.models.map((item) => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </div>
+              <small>{config.models.find((item) => item.id === settingsDraft.modelId)?.description}</small>
             </div>
             <div className="settings-section">
               <label htmlFor="clarification-select">{text("clarification")}</label>
-              <select
-                id="clarification-select"
-                onChange={(event) => setClarificationStyle(event.target.value)}
-                value={clarificationStyle}
-              >
-                <option value="auto">{text("auto")}</option>
-                <option value="guided">{text("guided")}</option>
-                <option value="direct">{text("direct")}</option>
-              </select>
+              <div className="select-control">
+                <select
+                  id="clarification-select"
+                  onChange={(event) => setSettingsDraft((draft) => ({ ...draft, clarificationStyle: event.target.value }))}
+                  value={settingsDraft.clarificationStyle}
+                >
+                  <option value="auto">{text("auto")}</option>
+                  <option value="guided">{text("guided")}</option>
+                  <option value="direct">{text("direct")}</option>
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </div>
             </div>
             {usage && (
               <div className="settings-section usage-section">
@@ -1470,6 +1763,14 @@ export function ChatWorkspace() {
                 type="button"
               >
                 <Trash2 />{text("deleteAccount")}
+              </button>
+            </div>
+            <div className="settings-actions">
+              <button className="secondary-button" onClick={closeSettings} type="button">
+                {text("cancel")}
+              </button>
+              <button className="primary-button" onClick={saveSettings} type="button">
+                <Check />{text("saveChanges")}
               </button>
             </div>
           </section>

@@ -408,9 +408,7 @@ def load_live_source_registry(
     path: str | Path | None = None,
 ) -> tuple[LiveSourceDefinition, ...]:
     registry_path = Path(
-        path
-        or os.getenv("LIVE_SOURCE_REGISTRY_PATH")
-        or DEFAULT_LIVE_SOURCE_REGISTRY
+        path or os.getenv("LIVE_SOURCE_REGISTRY_PATH") or DEFAULT_LIVE_SOURCE_REGISTRY
     )
     data = json.loads(registry_path.read_text(encoding="utf-8"))
     if data.get("schema_version") != LIVE_SOURCE_REGISTRY_VERSION:
@@ -462,7 +460,12 @@ def _decode_source_body(content_type: str, payload: bytes) -> str:
 
         visit(value)
         return "\n".join(strings)
-    if content_type in {"text/html", "application/rss+xml", "application/xml", "text/xml"}:
+    if content_type in {
+        "text/html",
+        "application/rss+xml",
+        "application/xml",
+        "text/xml",
+    }:
         parser = _VisibleTextParser()
         try:
             parser.feed(decoded)
@@ -477,7 +480,9 @@ def _candidate_passages(text: str) -> tuple[str, ...]:
     blocks = [item for item in blocks if 40 <= len(item) <= 4000]
     if not blocks:
         compact = " ".join(text.split())
-        blocks = [compact[index : index + 1800] for index in range(0, len(compact), 1800)]
+        blocks = [
+            compact[index : index + 1800] for index in range(0, len(compact), 1800)
+        ]
     return tuple(blocks[:1000])
 
 
@@ -509,8 +514,7 @@ def _evidence_from_passage(
     observed_at: str,
 ) -> LiveEvidence:
     expires_at = (
-        datetime.fromisoformat(observed_at)
-        + timedelta(seconds=definition.ttl_seconds)
+        datetime.fromisoformat(observed_at) + timedelta(seconds=definition.ttl_seconds)
     ).isoformat()
     identity = f"{definition.source_id}\n{definition.url}\n{passage}\n{observed_at}"
     return LiveEvidence(
@@ -584,9 +588,18 @@ class TrustedSourceClient:
                     or "Trusted live search has no authorized source connector."
                 ),
             )
-        candidates = [
-            item for item in self.definitions if category in item.categories
-        ][: max(1, min(TRUSTED_SEARCH_MAX_RESULTS, 5))]
+        query_tokens = _normalized_tokens(query)
+        eligible = [item for item in self.definitions if category in item.categories]
+        candidates = sorted(
+            eligible,
+            key=lambda item: (
+                -len(
+                    query_tokens
+                    & _normalized_tokens(" ".join((item.title, *item.keywords)))
+                ),
+                item.source_id,
+            ),
+        )[: max(1, min(TRUSTED_SEARCH_MAX_RESULTS, 5))]
         evidence: list[LiveEvidence] = []
         attempts = 0
         for definition in candidates:
@@ -604,9 +617,12 @@ class TrustedSourceClient:
                 )
                 if response.status_code != 200:
                     continue
-                content_type = str(response.headers.get("Content-Type") or "").split(
-                    ";", 1
-                )[0].lower().strip()
+                content_type = (
+                    str(response.headers.get("Content-Type") or "")
+                    .split(";", 1)[0]
+                    .lower()
+                    .strip()
+                )
                 if content_type not in definition.allowed_content_types:
                     continue
                 raw_length = response.headers.get("Content-Length")

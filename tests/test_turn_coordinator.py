@@ -76,8 +76,13 @@ def test_fifty_concurrent_reservations_cannot_exceed_limits(
 
     assert sum(result.allowed for result in results) == 12
     with store._connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 12
-        assert connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0] == 12
+        assert (
+            connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 12
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0]
+            == 12
+        )
         assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 12
     store.close()
 
@@ -100,8 +105,13 @@ def test_fifty_duplicate_keys_create_one_turn_and_one_reservation(
     assert len({result.turn_id for result in results}) == 1
     assert sum(not result.existing for result in results) == 1
     with store._connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 1
-        assert connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0] == 1
+        assert (
+            connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 1
+        )
+        assert (
+            connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0]
+            == 1
+        )
         assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     store.close()
 
@@ -196,3 +206,39 @@ def test_completion_cannot_replace_a_cancelled_terminal_turn(tmp_path) -> None:
     assert state["message"] is None
     assert state["terminal_sequence"] == 2
     store.close()
+
+
+def test_clarification_interaction_survives_finalization_and_reload(tmp_path) -> None:
+    store = PilotStore(sqlite_path=tmp_path / "clarification.sqlite3")
+    actor_id, conversation_id = _workspace(store)
+    coordinator = TurnCoordinator(store)
+    command = _command(actor_id, conversation_id, 1)
+    reservation = _reserve(coordinator, command)
+    interaction = {
+        "schema_version": "raise-clarification-v1",
+        "type": "clarification",
+        "round": 1,
+        "max_rounds": 3,
+        "question": "Which crop?",
+        "options": [
+            {"id": "1", "label": "Potato", "value": "Potato"},
+            {"id": "2", "label": "Tomato", "value": "Tomato"},
+            {"id": "3", "label": "Other", "value": "Other"},
+        ],
+        "missing_fields": ["crop"],
+        "language": "english",
+    }
+    result = TurnResult(
+        content="Which crop?",
+        kind="clarification",
+        language="english",
+        model="test/analyzer",
+        interaction=interaction,
+    )
+    coordinator.finalize(
+        command, str(reservation.turn_id), result, analysis={}, terminal_sequence=2
+    )
+    status = coordinator.status(actor_id, str(reservation.turn_id))
+    messages = store.list_messages(actor_id, conversation_id)
+    assert status["message"]["interaction"] == interaction
+    assert messages[-1]["interaction"] == interaction

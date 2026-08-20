@@ -12,8 +12,14 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx
+from instructor.core.exceptions import InstructorError
 
 from .assistant_contracts import TurnCommand, TurnEvent, TurnResult
+from .clarification import (
+    ClarificationState,
+    ClarificationWorkflow,
+    StructuredRequestAnalysis,
+)
 from .config import (
     ANSWER_VERIFIER_MODEL,
     MODE_PROFILES,
@@ -50,6 +56,7 @@ class RequestAnalysis:
     output_shape: str
     clarification_options: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
+    clarification_questions: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +70,7 @@ class RequestAnalysis:
             "needs_clarification": self.needs_clarification,
             "clarification_question": self.clarification_question,
             "clarification_options": list(self.clarification_options),
+            "clarification_questions": [dict(item) for item in self.clarification_questions],
             "retrieval_queries": list(self.retrieval_queries),
             "evidence_requirements": list(self.evidence_requirements),
             "output_shape": self.output_shape,
@@ -83,6 +91,29 @@ REQUEST_ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
         "needs_clarification": {"type": "boolean"},
         "clarification_question": {"type": ["string", "null"]},
         "clarification_options": {"type": "array", "items": {"type": "string"}},
+        "clarification_questions": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "prompt": {"type": "string"},
+                    "answer_type": {
+                        "type": "string",
+                        "enum": ["single", "multiple", "text"],
+                    },
+                    "required": {"type": "boolean"},
+                    "options": {"type": "array", "items": {"type": "string"}},
+                    "allow_other": {"type": "boolean"},
+                },
+                "required": [
+                    "id", "prompt", "answer_type", "required",
+                    "options", "allow_other",
+                ],
+                "additionalProperties": False,
+            },
+        },
         "retrieval_queries": {"type": "array", "items": {"type": "string"}},
         "evidence_requirements": {"type": "array", "items": {"type": "string"}},
         "output_shape": {"type": "string"},
@@ -99,6 +130,7 @@ REQUEST_ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
         "needs_clarification",
         "clarification_question",
         "clarification_options",
+        "clarification_questions",
         "retrieval_queries",
         "evidence_requirements",
         "output_shape",
@@ -121,6 +153,8 @@ class PreparedTurn:
     stage_durations: dict[str, int]
     retrieval_metrics: dict[str, Any]
     graph_paths: list[dict[str, Any]]
+    effective_text: str
+    interaction: dict[str, Any]
     provider_record_start: int = 0
 
 
@@ -133,6 +167,7 @@ class PipelineResult(TurnResult):
 class PipelineEvent(TurnEvent):
     """Backward-compatible name for the canonical typed turn event."""
 
+
 class AssistantEngine:
     def __init__(
         self,
@@ -144,8 +179,8 @@ class AssistantEngine:
         retrieval: RetrievalService | None = None,
     ) -> None:
         self.knowledge = knowledge
-        resolved_key = api_key if api_key is not None else os.getenv(
-            "OPENROUTER_API_KEY", ""
+        resolved_key = (
+            api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY", "")
         )
         self.provider = provider or ProviderClient(
             api_key=resolved_key,
@@ -153,6 +188,9 @@ class AssistantEngine:
         )
         self.api_key = self.provider.api_key
         self.retrieval = retrieval or LegacyHybridRetrieval(knowledge)
+        self.clarification = ClarificationWorkflow(
+            os.getenv("CLARIFICATION_DATABASE_URL", ""), self._plan_clarification
+        )
 
     async def close(self) -> None:
         await self.provider.close()
@@ -171,20 +209,59 @@ class AssistantEngine:
         language = detect_language(request.text)
         provider_record_start = len(self.provider.records)
         analysis_started = time.perf_counter()
-        analysis = await self._analyze(
-            request,
+        actor_id = (
+            request.actor_id if isinstance(request, TurnCommand) else request.user_id
+        )
+        outcome = await self.clarification.advance(
+            actor_id=actor_id,
+            conversation_id=request.conversation_id,
+            text=request.text,
             language=language,
+            mode=request.mode,
+            clarification_style=request.clarification_style,
             history=history,
+            clarification_response=(
+                request.clarification_response
+                if isinstance(request, TurnCommand) else None
+            ),
+        )
+        effective_text = outcome.effective_text
+        language = detect_language(effective_text)
+        fallback = self._heuristic_analysis(
+            effective_text,
+            language=language,
+            clarification_style=request.clarification_style,
+            clarification_count=clarification_count,
+        )
+        analysis = self._coerce_analysis(
+            outcome.analysis,
+            fallback=fallback,
+            clarification_style=request.clarification_style,
             clarification_count=clarification_count,
         )
         profile = MODE_PROFILES.get(request.mode, MODE_PROFILES["standard"])
-        timings = {
-            "analysis": int((time.perf_counter() - analysis_started) * 1000)
-        }
+        timings = {"analysis": int((time.perf_counter() - analysis_started) * 1000)}
+        if outcome.pending:
+            return PreparedTurn(
+                analysis=analysis,
+                language=language,
+                sources=[],
+                project_sources=[],
+                citations=[],
+                trusted_context="",
+                warning=None,
+                tools_used=[],
+                stage_durations=timings,
+                retrieval_metrics={"route": "clarification"},
+                graph_paths=[],
+                effective_text=effective_text,
+                interaction=outcome.interaction,
+                provider_record_start=provider_record_start,
+            )
         retrieval_started = time.perf_counter()
         bundle = await self.retrieval.retrieve(
             RetrievalRequest(
-                query=request.text,
+                query=effective_text,
                 queries=analysis.retrieval_queries,
                 language=language,
                 mode=request.mode,
@@ -205,14 +282,10 @@ class AssistantEngine:
         )
         sources = bundle.knowledge_results
         project_sources = bundle.project_results
-        timings["retrieval"] = int(
-            (time.perf_counter() - retrieval_started) * 1000
-        )
+        timings["retrieval"] = int((time.perf_counter() - retrieval_started) * 1000)
         builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
         if bundle.retrieval_metrics.get("backend") == "postgres_hybrid_graph":
-            citations = [
-                item.citation() for item in [*bundle.passages, *bundle.claims]
-            ]
+            citations = [item.citation() for item in [*bundle.passages, *bundle.claims]]
         else:
             citations = builder._internal_citations(sources)
             citations.extend(builder._project_citations(project_sources))
@@ -220,7 +293,7 @@ class AssistantEngine:
         warning = None
         trusted_context = ""
         if not analysis.needs_clarification and self._requires_trusted_search(
-            request.text, analysis
+            effective_text, analysis
         ):
             trusted_started = time.perf_counter()
             if tools.trusted_client:
@@ -228,7 +301,7 @@ class AssistantEngine:
                     tools.trusted_client.search,
                     analysis.retrieval_queries[0]
                     if analysis.retrieval_queries
-                    else request.text,
+                    else effective_text,
                 )
                 timings["trusted_search"] = int(
                     (time.perf_counter() - trusted_started) * 1000
@@ -253,6 +326,8 @@ class AssistantEngine:
             stage_durations=timings,
             retrieval_metrics=dict(bundle.retrieval_metrics),
             graph_paths=[dict(path) for path in bundle.graph_paths],
+            effective_text=effective_text,
+            interaction={},
             provider_record_start=provider_record_start,
         )
 
@@ -281,6 +356,13 @@ class AssistantEngine:
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 ttft_ms=0,
                 stage_durations=dict(prepared.stage_durations),
+                provider_calls=[
+                    record.to_dict()
+                    for record in self.provider.records[
+                        prepared.provider_record_start :
+                    ]
+                ],
+                interaction=prepared.interaction,
             )
             yield PipelineEvent(
                 "clarification",
@@ -288,6 +370,7 @@ class AssistantEngine:
                     "content": content,
                     "missing_fields": list(analysis.missing_fields),
                     "options": list(analysis.clarification_options),
+                    "interaction": prepared.interaction,
                 },
             )
             yield PipelineEvent(
@@ -304,14 +387,12 @@ class AssistantEngine:
                 model=resolve_model_id(request.model_id, profile.model),
             )
         except ValueError as exc:
-            yield self._error_result(
-                prepared, started, "invalid_model", str(exc)
-            )
+            yield self._error_result(prepared, started, "invalid_model", str(exc))
             return
 
         builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
         messages = builder._build_messages(
-            query=request.text,
+            query=prepared.effective_text,
             sources=prepared.sources,
             project_sources=prepared.project_sources,
             trusted_context=prepared.trusted_context,
@@ -321,7 +402,7 @@ class AssistantEngine:
             clarification_style=request.clarification_style,
             attachments=list(request.attachments),
             verification_required=self._requires_trusted_search(
-                request.text, analysis
+                prepared.effective_text, analysis
             ),
             project_instructions=request.project_instructions,
         )
@@ -333,7 +414,7 @@ class AssistantEngine:
                 self._safe_verification_fallback(prepared.language)
                 if requires_verification
                 else builder._fallback_answer(
-                    request.text,
+                    prepared.effective_text,
                     prepared.sources,
                     prepared.project_sources,
                     prepared.language,
@@ -350,7 +431,9 @@ class AssistantEngine:
                 warnings=(
                     [prepared.warning or self._verification_warning(prepared.language)]
                     if requires_verification
-                    else [prepared.warning] if prepared.warning else []
+                    else [prepared.warning]
+                    if prepared.warning
+                    else []
                 ),
                 tools_used=prepared.tools_used,
                 artifact_ids=[],
@@ -358,9 +441,7 @@ class AssistantEngine:
                 ttft_ms=0,
                 stage_durations=dict(prepared.stage_durations),
             )
-            yield PipelineEvent(
-                "turn.completed", {"kind": result.kind}, result=result
-            )
+            yield PipelineEvent("turn.completed", {"kind": result.kind}, result=result)
             return
 
         yield PipelineEvent("status", {"stage": "generation"})
@@ -408,7 +489,7 @@ class AssistantEngine:
             yield PipelineEvent("status", {"stage": "verification"})
             verification_started = time.perf_counter()
             answer, verifier_warning, verifier_approved = await self._verify(
-                query=request.text,
+                query=prepared.effective_text,
                 answer=answer,
                 citations=[*prepared.citations, *annotations],
                 language=prepared.language,
@@ -563,6 +644,29 @@ class AssistantEngine:
 
         raise ValueError("Tool loop ended without a final answer")
 
+    async def _plan_clarification(
+        self, state: ClarificationState
+    ) -> StructuredRequestAnalysis:
+        request = AssistantRequest(
+            user_id=str(state.get("actor_id") or "workflow"),
+            channel="workflow",
+            conversation_id=str(state.get("conversation_id") or "workflow"),
+            project_id=None,
+            text=str(state.get("effective_text") or state.get("original_text") or ""),
+            mode=str(state.get("mode") or "standard"),
+            clarification_style=str(state.get("clarification_style") or "auto"),
+        )
+        language = str(state.get("language") or detect_language(request.text))
+        analysis = await self._analyze(
+            request,
+            language=language,
+            history=list(state.get("history") or []),
+            clarification_count=int(state.get("round") or 0),
+        )
+        return StructuredRequestAnalysis.model_validate(
+            analysis.to_dict(), context={"language": language}
+        )
+
     async def _analyze(
         self,
         request: AssistantRequest | TurnCommand,
@@ -597,17 +701,23 @@ class AssistantEngine:
                         "Return JSON only with intent, decision, domain, risk "
                         "(low|medium|high), currentness (stable|current), location, "
                         "missing_fields, needs_clarification, clarification_question, "
-                        "clarification_options (array of 2-4 short suggested answers "
-                        "the user can pick from), "
-                        "retrieval_queries, evidence_requirements, output_shape, and "
-                        "assumptions. Ask only when missing context materially changes "
-                        "safety or usefulness. Ask at most two details in accessible "
-                        "language. When clarifying, always provide 2-4 short options "
-                        "the user can choose from. "
-                        "If clarifications_already_asked >= 1 and the user gave a "
-                        "vague or deflecting reply (e.g. 'you choose', 'anything', "
-                        "'I don't know'), set needs_clarification to false and fill "
-                        "assumptions with what you assumed instead. "
+                        "clarification_options, clarification_questions, retrieval_queries, "
+                        "evidence_requirements, output_shape, and assumptions. Ask only "
+                        "when missing context materially changes safety or usefulness. "
+                        "When clarification is needed, return one to three independent "
+                        "questions in clarification_questions so the user can answer them "
+                        "together. Each question needs a stable snake_case id, prompt, "
+                        "answer_type, required flag, two to six short options for choice "
+                        "controls, and allow_other. Set allow_other only when free text is "
+                        "genuinely useful; never put an Other label inside options. Keep "
+                        "the legacy clarification_question and clarification_options equal "
+                        "to the first question for compatibility. Use the user's writing "
+                        "system for every prompt and option. RAISE targets "
+                        "Akkar and rural Lebanon first: use that as the default when "
+                        "the user gives no other geography, and never suggest tropical "
+                        "or otherwise implausible local choices without user context. "
+                        "Include an "
+                        "I-don't-know option only when it is genuinely useful. "
                         "Do not include reasoning or chain-of-thought."
                     ),
                 },
@@ -620,6 +730,7 @@ class AssistantEngine:
                             "mode": request.mode,
                             "clarification_style": request.clarification_style,
                             "clarifications_already_asked": clarification_count,
+                            "default_geography": "Akkar, Lebanon",
                             "recent_context": context,
                         },
                         ensure_ascii=False,
@@ -640,19 +751,38 @@ class AssistantEngine:
             "provider": self._provider_policy(),
         }
         try:
-            response = await self.provider.complete(
-                stage="analyzer",
-                payload=payload,
-                timeout=15.0,
-            )
-            content = response.message["content"]
+            structured_method = getattr(self.provider, "complete_structured", None)
+            if structured_method is not None:
+                structured = await structured_method(
+                    stage="analyzer",
+                    model=REQUEST_ANALYZER_MODEL,
+                    messages=payload["messages"],
+                    response_model=StructuredRequestAnalysis,
+                    validation_context={"language": language},
+                    max_retries=2,
+                    timeout=25.0,
+                    max_tokens=900,
+                )
+                value = structured.model_dump(mode="json")
+            else:
+                response = await self.provider.complete(
+                    stage="analyzer", payload=payload, timeout=15.0
+                )
+                value = json.loads(response.message["content"])
             return self._coerce_analysis(
-                json.loads(content),
+                value,
                 fallback=fallback,
                 clarification_style=request.clarification_style,
                 clarification_count=clarification_count,
             )
-        except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        except (
+            InstructorError,
+            httpx.HTTPError,
+            KeyError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
             return fallback
 
     async def _openrouter_stream(
@@ -788,9 +918,7 @@ class AssistantEngine:
             timeout_seconds=timeout,
             max_parallel_calls=4,
             max_total_calls=(
-                maximum
-                if maximum is not None
-                else defaults.get(profile.key, 6)
+                maximum if maximum is not None else defaults.get(profile.key, 6)
             ),
         )
 
@@ -832,17 +960,33 @@ class AssistantEngine:
                 normalized,
             )
         )
-        ambiguous = len(query.split()) < 4 or bool(
+        broad_request = bool(
             re.fullmatch(
                 r"\s*(help|what should i do|ساعدني|ماذا أفعل|شو اعمل)[؟?!. ]*",
                 normalized,
             )
         )
-        needs = (
-            ambiguous
-            and clarification_style != "direct"
-            and clarification_count < 1
+        explicitly_answerable = bool(
+            re.search(
+                r"\b(define|explain|what is|price|weather|source|list)\b|"
+                r"(what's the current|current price)",
+                normalized,
+            )
+        ) or any(
+            term in normalized
+            for term in (
+                "\u0645\u0627 \u0647\u0648",
+                "\u0627\u0634\u0631\u062d",
+                "\u0633\u0639\u0631",
+                "\u0637\u0642\u0633",
+                "\u0645\u0635\u062f\u0631",
+                "\u0642\u0627\u0626\u0645\u0629",
+            )
         )
+        ambiguous = broad_request or (
+            len(query.split()) < 4 and not explicitly_answerable
+        )
+        needs = ambiguous and clarification_style != "direct"
         question = None
         options: tuple[str, ...] = ()
         if needs:
@@ -862,6 +1006,18 @@ class AssistantEngine:
                     "Farm project planning",
                     "Pest or disease control",
                 )
+        clarification_questions = (
+            (
+                {
+                    "id": "topic",
+                    "prompt": question,
+                    "answer_type": "single",
+                    "required": True,
+                    "options": list(options),
+                    "allow_other": True,
+                },
+            ) if needs and question else ()
+        )
         return RequestAnalysis(
             intent="decision_support",
             decision="Provide practical guidance",
@@ -873,6 +1029,7 @@ class AssistantEngine:
             needs_clarification=needs,
             clarification_question=question,
             clarification_options=options,
+            clarification_questions=clarification_questions,
             retrieval_queries=(query,),
             evidence_requirements=(
                 ("trusted_current_source",) if current or high_risk else ("raise",)
@@ -891,15 +1048,11 @@ class AssistantEngine:
         risk = str(value.get("risk") or fallback.risk).lower()
         if risk not in {"low", "medium", "high"}:
             risk = fallback.risk
-        currentness = str(
-            value.get("currentness") or fallback.currentness
-        ).lower()
+        currentness = str(value.get("currentness") or fallback.currentness).lower()
         if currentness not in {"stable", "current"}:
             currentness = fallback.currentness
         needs = bool(value.get("needs_clarification"))
         if clarification_style == "direct" and risk != "high":
-            needs = False
-        if clarification_count >= 1:
             needs = False
         question = str(value.get("clarification_question") or "").strip() or None
         if needs and not question:
@@ -908,14 +1061,72 @@ class AssistantEngine:
             str(item).strip()[:120]
             for item in value.get("clarification_options") or []
             if str(item).strip()
-        )[:4]
+        )[:5]
         if needs and not options:
             options = fallback.clarification_options
-        queries = tuple(
-            str(item).strip()[:500]
-            for item in value.get("retrieval_queries") or []
-            if str(item).strip()
-        )[:4] or fallback.retrieval_queries
+        questions: list[dict[str, Any]] = []
+        raw_questions = value.get("clarification_questions")
+        if isinstance(raw_questions, list):
+            for index, item in enumerate(raw_questions[:3]):
+                if not isinstance(item, dict):
+                    continue
+                prompt = str(item.get("prompt") or "").strip()[:280]
+                answer_type = str(item.get("answer_type") or "single")
+                if answer_type not in {"single", "multiple", "text"}:
+                    answer_type = "single"
+                raw_options = item.get("options")
+                normalized_options = tuple(
+                    dict.fromkeys(
+                        str(option).strip()[:120]
+                        for option in (raw_options if isinstance(raw_options, list) else [])
+                        if str(option).strip()
+                    )
+                )[:6]
+                if not prompt or (
+                    answer_type != "text" and len(normalized_options) < 2
+                ):
+                    continue
+                raw_id = re.sub(
+                    r"[^a-z0-9_]+",
+                    "_",
+                    str(item.get("id") or f"detail_{index + 1}").lower(),
+                ).strip("_")
+                if not raw_id or not raw_id[0].isalpha():
+                    raw_id = f"detail_{index + 1}"
+                questions.append(
+                    {
+                        "id": raw_id[:40],
+                        "prompt": prompt,
+                        "answer_type": answer_type,
+                        "required": bool(item.get("required", True)),
+                        "options": list(normalized_options),
+                        "allow_other": bool(item.get("allow_other", False)),
+                    }
+                )
+        if needs and not questions:
+            questions = [dict(item) for item in fallback.clarification_questions]
+        if needs and not questions and question:
+            questions = [
+                {
+                    "id": "detail",
+                    "prompt": question,
+                    "answer_type": "single",
+                    "required": True,
+                    "options": list(options),
+                    "allow_other": False,
+                }
+            ]
+        if questions:
+            question = str(questions[0]["prompt"])
+            options = tuple(str(item) for item in questions[0]["options"])
+        queries = (
+            tuple(
+                str(item).strip()[:500]
+                for item in value.get("retrieval_queries") or []
+                if str(item).strip()
+            )[:4]
+            or fallback.retrieval_queries
+        )
         return RequestAnalysis(
             intent=str(value.get("intent") or fallback.intent)[:120],
             decision=str(value.get("decision") or fallback.decision)[:300],
@@ -929,6 +1140,7 @@ class AssistantEngine:
                 if str(item).strip()
             )[:6],
             needs_clarification=needs and bool(question),
+            clarification_questions=tuple(questions) if needs else (),
             clarification_question=question if needs else None,
             clarification_options=options if needs else (),
             retrieval_queries=queries,
@@ -937,9 +1149,7 @@ class AssistantEngine:
                 for item in value.get("evidence_requirements") or []
                 if str(item).strip()
             )[:8],
-            output_shape=str(
-                value.get("output_shape") or fallback.output_shape
-            )[:80],
+            output_shape=str(value.get("output_shape") or fallback.output_shape)[:80],
             assumptions=tuple(
                 str(item).strip()[:300]
                 for item in value.get("assumptions") or []
@@ -948,9 +1158,7 @@ class AssistantEngine:
         )
 
     @staticmethod
-    def _requires_trusted_search(
-        query: str, analysis: RequestAnalysis
-    ) -> bool:
+    def _requires_trusted_search(query: str, analysis: RequestAnalysis) -> bool:
         return (
             analysis.currentness == "current"
             or analysis.risk == "high"
@@ -1019,10 +1227,7 @@ class AssistantEngine:
 
     @staticmethod
     def _display_chunks(content: str, size: int = 90) -> list[str]:
-        return [
-            content[index : index + size]
-            for index in range(0, len(content), size)
-        ]
+        return [content[index : index + size] for index in range(0, len(content), size)]
 
     @staticmethod
     def _int_or_none(value: Any) -> int | None:

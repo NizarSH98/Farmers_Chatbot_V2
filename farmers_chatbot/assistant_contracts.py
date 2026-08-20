@@ -35,6 +35,7 @@ class TurnCommand:
     project_id: str | None = None
     attachments: tuple[dict[str, Any], ...] = ()
     attachment_references: tuple[dict[str, Any], ...] = ()
+    clarification_response: dict[str, Any] | None = None
     mode: str = "standard"
     model_id: str | None = None
     clarification_style: str = "auto"
@@ -53,6 +54,7 @@ class TurnCommand:
             "attachment_references": list(
                 self.attachment_references or self.attachments
             ),
+            "clarification_response": self.clarification_response,
             "mode": self.mode,
             "model_id": self.model_id,
             "clarification_style": self.clarification_style,
@@ -82,6 +84,7 @@ class TurnResult:
     error_type: str | None = None
     follow_up_questions: list[str] = field(default_factory=list)
     provider_calls: list[dict[str, Any]] = field(default_factory=list)
+    interaction: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
