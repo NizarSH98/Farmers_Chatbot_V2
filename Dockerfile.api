@@ -19,6 +19,8 @@ COPY knowledge_base ./knowledge_base
 COPY config ./config
 COPY legal ./legal
 COPY scripts ./scripts
+# Data commands (evaluate, ablate, graph-profile) run inside this image.
+COPY evaluation ./evaluation
 COPY mcp_server.py ./
 
 RUN mkdir -p /app/data /app/model-cache /app/reports/generated \
