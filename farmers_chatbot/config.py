@@ -40,35 +40,56 @@ class ModelOption:
     label: str
     description: str
     supports_images: bool
+    # Provider capability, used to size requests instead of guessing. context
+    # is the total window; max_output is the largest completion the provider
+    # will return.
+    context_tokens: int = 128_000
+    max_output_tokens: int = 4_096
 
 
 MODEL_CATALOG: dict[str, ModelOption] = {
+    "openai/gpt-5.6-luna": ModelOption(
+        id="openai/gpt-5.6-luna",
+        label="GPT-5.6 Luna",
+        description=(
+            "Fast, low-cost default with strong reasoning and image support."
+        ),
+        supports_images=True,
+        context_tokens=1_050_000,
+        max_output_tokens=128_000,
+    ),
     "moonshotai/kimi-k3": ModelOption(
         id="moonshotai/kimi-k3",
         label="Kimi K3",
-        description="Strong multimodal reasoning model; the default for accuracy.",
+        description="Highest-accuracy multimodal model for difficult questions.",
         supports_images=True,
+        context_tokens=1_048_576,
+        max_output_tokens=32_000,
     ),
     "xiaomi/mimo-v2.5": ModelOption(
         id="xiaomi/mimo-v2.5",
         label="MiMo V2.5",
         description="Efficient multimodal model for routine and visual questions.",
         supports_images=True,
+        context_tokens=1_050_000,
+        max_output_tokens=131_072,
     ),
     "minimax/minimax-m3": ModelOption(
         id="minimax/minimax-m3",
         label="MiniMax M3",
         description="Balanced multimodal model for analysis and artifacts.",
         supports_images=True,
+        context_tokens=1_048_576,
+        max_output_tokens=512_000,
     ),
 }
 
 
 DEFAULT_FAST_MODEL = os.getenv(
-    "OPENROUTER_FAST_MODEL", "moonshotai/kimi-k3"
+    "OPENROUTER_FAST_MODEL", "openai/gpt-5.6-luna"
 )
 DEFAULT_DEEP_MODEL = os.getenv(
-    "OPENROUTER_DEEP_MODEL", "moonshotai/kimi-k3"
+    "OPENROUTER_DEEP_MODEL", "openai/gpt-5.6-luna"
 )
 _configured_allowed_models = tuple(
     model.strip()
@@ -84,6 +105,40 @@ OPENROUTER_ALLOWED_MODELS = tuple(
 OPENROUTER_DEFAULT_MODEL = os.getenv(
     "OPENROUTER_DEFAULT_MODEL", DEFAULT_FAST_MODEL
 ).strip()
+
+
+def model_capability(model_id: str) -> ModelOption:
+    """Capability record for a model, falling back to conservative limits."""
+
+    return MODEL_CATALOG.get(model_id) or ModelOption(
+        id=model_id,
+        label=model_id,
+        description="",
+        supports_images=False,
+    )
+
+
+def resolve_max_tokens(mode_max_tokens: int, model_id: str) -> int:
+    """Size a completion to the mode's need and the model's real ceiling.
+
+    The mode value is a target, not a hard cap. A model that can return far more
+    should not be limited to a constant chosen for a smaller generation, and a
+    model that returns less must not be asked for more than it can deliver.
+    """
+
+    capability = model_capability(model_id)
+    return max(256, min(int(mode_max_tokens), capability.max_output_tokens))
+
+
+def resolve_history_budget(model_id: str) -> tuple[int, int]:
+    """Return (turns kept, characters per turn) scaled to the context window."""
+
+    context = model_capability(model_id).context_tokens
+    if context >= 500_000:
+        return 24, 16_000
+    if context >= 128_000:
+        return 16, 12_000
+    return 8, 6_000
 
 
 def resolve_model_id(requested: str | None, fallback: str) -> str:
@@ -103,7 +158,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Short answer for routine questions and slower connections.",
         model=DEFAULT_FAST_MODEL,
         top_k=4,
-        max_tokens=700,
+        max_tokens=2_000,
         temperature=0.2,
         reasoning_effort="low",
         allow_general_knowledge=True,
@@ -116,7 +171,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Default balance of local evidence, detail, latency, and cost.",
         model=DEFAULT_FAST_MODEL,
         top_k=6,
-        max_tokens=1200,
+        max_tokens=6_000,
         temperature=0.25,
         reasoning_effort="medium",
         allow_general_knowledge=True,
@@ -129,7 +184,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="More retrieval and reasoning for planning or comparison.",
         model=DEFAULT_DEEP_MODEL,
         top_k=9,
-        max_tokens=2000,
+        max_tokens=16_000,
         temperature=0.2,
         reasoning_effort="high",
         allow_general_knowledge=True,
@@ -142,7 +197,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Auditable answer restricted to the reviewed knowledge base.",
         model=DEFAULT_FAST_MODEL,
         top_k=10,
-        max_tokens=1000,
+        max_tokens=4_000,
         temperature=0.0,
         reasoning_effort="low",
         allow_general_knowledge=False,

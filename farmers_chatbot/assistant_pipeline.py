@@ -28,6 +28,7 @@ from .config import (
     OPENROUTER_ENFORCE_ZDR,
     REQUEST_ANALYZER_MODEL,
     ModeProfile,
+    resolve_max_tokens,
     resolve_model_id,
 )
 from .documents import ProjectSearchResult
@@ -144,6 +145,14 @@ REQUEST_ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
+
+
+def _verifier_token_budget(draft: str) -> int:
+    """Size the verifier to the draft it must echo back, with headroom."""
+
+    # ~4 characters per token, doubled for the JSON envelope and warning text.
+    estimated = (len(draft) // 4) * 2
+    return max(2_000, min(estimated + 1_500, 32_000))
 
 
 @dataclass
@@ -494,7 +503,7 @@ class AssistantEngine:
         if verification_required:
             yield PipelineEvent("status", {"stage": "verification"})
             verification_started = time.perf_counter()
-            answer, verifier_warning, verifier_approved = await self._verify(
+            answer, verifier_warning, verification_outcome = await self._verify(
                 query=prepared.effective_text,
                 answer=answer,
                 citations=[*prepared.citations, *annotations],
@@ -507,7 +516,7 @@ class AssistantEngine:
             )
             warning = verifier_warning or warning
         else:
-            verifier_approved = True
+            verification_outcome = "approved"
 
         citations = self._dedupe_citations(
             [*prepared.citations, *annotations, *tools.recent_citations]
@@ -540,7 +549,7 @@ class AssistantEngine:
         )
         result = PipelineResult(
             content=answer,
-            kind="answer" if verifier_approved else "refusal",
+            kind="refusal" if verification_outcome == "refused" else "answer",
             language=prepared.language,
             model=profile.model,
             citations=citations,
@@ -603,7 +612,7 @@ class AssistantEngine:
                 "model": profile.model,
                 "messages": working_messages,
                 "temperature": profile.temperature,
-                "max_tokens": profile.max_tokens,
+                "max_tokens": resolve_max_tokens(profile.max_tokens, profile.model),
                 "reasoning": {
                     "effort": profile.reasoning_effort,
                     "exclude": True,
@@ -839,7 +848,11 @@ class AssistantEngine:
         language: str,
         risk: str,
         currentness: str,
-    ) -> tuple[str, str | None, bool]:
+    ) -> tuple[str, str | None, str]:
+        """Return (answer, warning, outcome) where outcome is approved,
+        revised, or refused. A revised draft is still a real answer and must
+        not be presented to the farmer as a refusal."""
+
         payload = {
             "model": ANSWER_VERIFIER_MODEL,
             "messages": [
@@ -875,7 +888,12 @@ class AssistantEngine:
                 },
             ],
             "temperature": 0,
-            "max_tokens": 1400,
+            # The verifier echoes the whole revised answer, so its budget must
+            # track the draft. A fixed cap truncated the JSON on long answers,
+            # which then failed to parse and surfaced as a safety refusal.
+            "max_tokens": resolve_max_tokens(
+                _verifier_token_budget(answer), ANSWER_VERIFIER_MODEL
+            ),
             "response_format": {"type": "json_object"},
             "reasoning": {"effort": "medium", "exclude": True},
             "provider": self._provider_policy(),
@@ -892,28 +910,31 @@ class AssistantEngine:
             revised = str(parsed.get("revised_answer") or "").strip()
             warning = str(parsed.get("warning") or "").strip() or None
             if approved:
-                return (revised or answer), warning, True
+                return (revised or answer), warning, "approved"
             if revised:
                 return (
                     revised,
                     warning
                     or "The verifier revised unsupported or unsafe parts of the draft.",
-                    False,
+                    "revised",
                 )
             return (
                 self._safe_verification_fallback(language),
                 warning
                 or "The draft did not pass verification and was replaced with a safe limitation.",
-                False,
+                "refused",
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            # A transport or parse failure is not a safety judgement. Still fail
+            # closed, but say the check did not run so it is distinguishable
+            # from the verifier actually rejecting the draft.
             warning = (
-                "تعذّر إكمال التحقق الإضافي؛ راجع هذا التوجيه مع خبير محلي مؤهل."
+                "تعذّر إكمال التحقق الإضافي لسبب تقني؛ راجع هذا التوجيه مع خبير محلي مؤهل."
                 if language == "arabic"
-                else "Additional verification could not be completed; review this "
-                "guidance with a qualified local expert."
+                else "Additional verification could not be completed for a technical "
+                "reason; review this guidance with a qualified local expert."
             )
-            return self._safe_verification_fallback(language), warning, False
+            return self._safe_verification_fallback(language), warning, "refused"
 
     @staticmethod
     def _tool_executor(

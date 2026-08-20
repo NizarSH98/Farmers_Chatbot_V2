@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import (
     ModeProfile,
+    resolve_history_budget,
 )
 from .documents import ProjectSearchResult
 from .knowledge import SearchResult
@@ -239,11 +240,12 @@ class AssistantPromptBuilder:
             "</language>"
         )
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
-        for turn in history[-12:]:
+        history_turns, history_chars = resolve_history_budget(profile.model)
+        for turn in history[-history_turns:]:
             role = turn.get("role")
             content = turn.get("content")
             if role in {"user", "assistant"} and isinstance(content, str):
-                messages.append({"role": role, "content": content[:8000]})
+                messages.append({"role": role, "content": content[:history_chars]})
 
         user_text = (
             "<raise_knowledge>\n"
