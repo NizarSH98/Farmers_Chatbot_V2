@@ -1,5 +1,8 @@
 from farmers_chatbot.qdrant_retrieval import QdrantGraphRetrieval
 from farmers_chatbot.retrieval import RetrievalRequest
+import pytest
+
+pytestmark = pytest.mark.arabic
 
 
 def test_arabizi_detection_is_language_scoped() -> None:

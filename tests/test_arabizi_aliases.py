@@ -1,4 +1,7 @@
 from farmers_chatbot.arabizi import arabic_to_arabizi
+import pytest
+
+pytestmark = pytest.mark.arabic
 
 
 def test_arabic_to_arabizi_is_deterministic_and_search_safe() -> None:

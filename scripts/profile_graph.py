@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from farmers_chatbot.agrifood_ontology import ONTOLOGY_VERSION  # noqa: E402
+from farmers_chatbot.agrifood_ontology import ONTOLOGY_VERSION
 
 
 def _rows(connection: Any, sql: str, params: tuple[Any, ...] = ()) -> list[dict]:

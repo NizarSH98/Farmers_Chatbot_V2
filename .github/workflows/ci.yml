@@ -44,7 +44,10 @@ jobs:
       - run: python scripts/release_preflight.py
       - run: python -m compileall -q farmers_chatbot mcp_server.py
       - run: python -m ruff check farmers_chatbot tests scripts mcp_server.py
-      - run: python -m pytest -q
+      # English first as the inner loop, Arabic as a required gate. Both run in
+      # CI; the split exists so local iteration need not pay for both.
+      - run: python -m pytest -q -m "not arabic"
+      - run: python -m pytest -q -m arabic
 
   frontend:
     runs-on: ubuntu-latest

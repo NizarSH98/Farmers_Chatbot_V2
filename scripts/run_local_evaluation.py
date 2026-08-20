@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -179,9 +180,19 @@ async def run(cases: tuple[EvaluationCase, ...], output: Path, concurrency: int)
     return report
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", choices=("public", "hidden"), default="public")
+    parser.add_argument(
+        "--max-language-gap-points",
+        type=float,
+        default=2.0,
+        help=(
+            "fail when Arabic trails English by more than this many points. "
+            "RAISE is Arabic-first, so an English-first workflow must not be "
+            "allowed to become English-only."
+        ),
+    )
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path)
@@ -200,6 +211,16 @@ def main() -> None:
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"cases": len(cases), "runs": str(output), "report": str(report_path), "metrics": report.get("metrics")}, ensure_ascii=False, sort_keys=True))
 
+    gap = report["metrics"]["quality"].get("arabic_english_gap_points")
+    if gap is not None and gap > args.max_language_gap_points:
+        print(
+            f"language gap {gap:.3f} points exceeds the "
+            f"{args.max_language_gap_points:.3f} limit",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
