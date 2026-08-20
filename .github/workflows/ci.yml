@@ -16,6 +16,22 @@ jobs:
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        # Tests exercise the real schema; there is no second backend to fall
+        # back to. pgvector matches the local Compose image.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: raise
+          POSTGRES_USER: raise
+          POSTGRES_PASSWORD: raise-local-only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U raise -d raise"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://raise:raise-local-only@127.0.0.1:55432/raise_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

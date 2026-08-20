@@ -1,7 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'status', 'logs', 'build-graph', 'evaluate', 'snapshot', 'export', 'restore', 'smoke')]
+    [ValidateSet('start', 'stop', 'status', 'logs', 'build-graph', 'evaluate', 'ablate', 'graph-profile', 'snapshot', 'export', 'restore', 'smoke', 'archive')]
     [string]$Command = 'status',
     [string]$Path = '',
     [switch]$Rebuild
@@ -18,33 +18,15 @@ function Invoke-Compose {
     if ($LASTEXITCODE -ne 0) { throw "docker compose failed with exit code $LASTEXITCODE" }
 }
 
-function Invoke-LocalPython {
+function Invoke-ContainerPython {
+    # Data commands run inside the API container so the local workflow uses the
+    # same interpreter, dependencies, and network as the deployed service. It
+    # also removes any dependency on a host Python or a published database port.
     param(
         [Parameter(Mandatory = $true)][string]$Module,
         [string[]]$Arguments = @()
     )
-    $oldDatabaseUrl = $env:DATABASE_URL
-    $oldQdrantUrl = $env:QDRANT_URL
-    $oldModelCache = $env:RAG_MODEL_CACHE
-    $oldPythonUtf8 = $env:PYTHONUTF8
-    $localPassword = if ($env:RAISE_LOCAL_DB_PASSWORD) { $env:RAISE_LOCAL_DB_PASSWORD } else { 'raise-local-only' }
-    $encodedPassword = [Uri]::EscapeDataString($localPassword)
-    try {
-        $env:DATABASE_URL = "postgresql://raise:${encodedPassword}@127.0.0.1:55432/raise"
-        $env:QDRANT_URL = 'http://127.0.0.1:6433'
-        $env:RAG_MODEL_CACHE = Join-Path $ProjectRoot 'model-cache'
-        $env:PYTHONUTF8 = '1'
-        Push-Location $ProjectRoot
-        & python -m $Module @Arguments
-        if ($LASTEXITCODE -ne 0) { throw "$Module failed with exit code $LASTEXITCODE" }
-    }
-    finally {
-        Pop-Location
-        $env:DATABASE_URL = $oldDatabaseUrl
-        $env:QDRANT_URL = $oldQdrantUrl
-        $env:RAG_MODEL_CACHE = $oldModelCache
-        $env:PYTHONUTF8 = $oldPythonUtf8
-    }
+    Invoke-Compose exec -T api sh -c "cd /app && python -m $Module $($Arguments -join ' ')"
 }
 
 function New-ReleaseSnapshot {
@@ -57,7 +39,11 @@ function New-ReleaseSnapshot {
     if (-not $postgresContainer) { throw 'PostgreSQL container is not running.' }
     & docker cp "${postgresContainer}:/tmp/raise-postgres.dump" (Join-Path $target 'postgres.dump')
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy PostgreSQL dump.' }
-    Invoke-LocalPython -Module 'scripts.snapshot_qdrant' -Arguments @('--output', (Join-Path $target 'qdrant-snapshots.json'))
+    Invoke-ContainerPython -Module 'scripts.snapshot_qdrant' -Arguments @('--output', '/tmp/qdrant-snapshots.json')
+    $apiContainer = (& docker compose -f $Compose ps -q api).Trim()
+    if (-not $apiContainer) { throw 'API container is not running.' }
+    & docker cp "${apiContainer}:/tmp/qdrant-snapshots.json" (Join-Path $target 'qdrant-snapshots.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not copy the Qdrant snapshot manifest.' }
     $files = Get-ChildItem -LiteralPath $target -Recurse -File | ForEach-Object {
         [ordered]@{
             path = $_.FullName.Substring($target.Length + 1).Replace('\', '/')
@@ -68,7 +54,7 @@ function New-ReleaseSnapshot {
     $handoff = [ordered]@{
         schema_version = 'raise.local-handoff.v1'
         created_at = (Get-Date).ToUniversalTime().ToString('o')
-        migration_revision = '20260812_0005'
+        migration_revision = '20260819_0006'
         files = @($files)
     }
     $handoff | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'handoff-manifest.json') -Encoding utf8
@@ -85,8 +71,10 @@ switch ($Command) {
     'stop' { Invoke-Compose down }
     'status' { Invoke-Compose ps }
     'logs' { Invoke-Compose logs --tail 200 api web postgres qdrant }
-    'build-graph' { Invoke-LocalPython -Module 'scripts.build_graph_release' -Arguments @('--activate') }
-    'evaluate' { Invoke-LocalPython -Module 'scripts.run_local_evaluation' -Arguments @('--split', 'public') }
+    'build-graph' { Invoke-ContainerPython -Module 'scripts.build_graph_release' -Arguments @('--activate') }
+    'evaluate' { Invoke-ContainerPython -Module 'scripts.run_local_evaluation' -Arguments @('--split', 'public') }
+    'ablate' { Invoke-ContainerPython -Module 'scripts.run_ablations' }
+    'graph-profile' { Invoke-ContainerPython -Module 'scripts.profile_graph' }
     'snapshot' { New-ReleaseSnapshot }
     'export' { New-ReleaseSnapshot }
     'restore' {
@@ -105,10 +93,16 @@ switch ($Command) {
         if ($LASTEXITCODE -ne 0) { throw 'Could not copy PostgreSQL dump.' }
         & docker compose -f $Compose exec -T postgres pg_restore -U raise --dbname=raise --clean --if-exists /tmp/raise-postgres.dump
         if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL restore failed.' }
-        Invoke-LocalPython -Module 'scripts.restore_qdrant' -Arguments @('--manifest', $qdrantManifest, '--replace')
-        Invoke-LocalPython -Module 'scripts.local_smoke_test'
+        $apiContainer = (& docker compose -f $Compose ps -q api).Trim()
+        if (-not $apiContainer) { throw 'API container is not running.' }
+        & docker cp $qdrantManifest "${apiContainer}:/tmp/qdrant-snapshots.json"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not copy the Qdrant snapshot manifest.' }
+        Invoke-ContainerPython -Module 'scripts.restore_qdrant' -Arguments @('--manifest', '/tmp/qdrant-snapshots.json', '--replace')
+        Invoke-ContainerPython -Module 'scripts.local_smoke_test'
     }
-    'smoke' {
-        Invoke-Compose exec -T api python -m scripts.local_smoke_test
+    'smoke' { Invoke-ContainerPython -Module 'scripts.local_smoke_test' }
+    'archive' {
+        if (-not $Path) { throw 'archive requires -Path <output-directory-inside-container>' }
+        Invoke-ContainerPython -Module 'scripts.archive_user_data' -Arguments @('--output', $Path)
     }
 }

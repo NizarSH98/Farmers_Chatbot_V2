@@ -16,30 +16,27 @@ canonical FastAPI app but is fail-closed behind `WHATSAPP_ENABLED=false`.
 
 ## Local development
 
-Use Python 3.12 and Node.js 22.12 or newer.
+There is one local mode: the Compose stack. PostgreSQL is required and there is
+no SQLite fallback, so local and hosted runs share one Alembic-versioned schema.
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
-alembic upgrade head
-uvicorn farmers_chatbot.web_api:app --reload --port 8000
+.\scriptsaise.ps1 start -Rebuild
+.\scriptsaise.ps1 smoke
 ```
 
-In a second terminal:
+Services bind to localhost only: web 3000, API 8000, PostgreSQL 55432, Qdrant
+6433. Data commands (`build-graph`, `evaluate`, `ablate`, `graph-profile`,
+`export`, `restore`, `archive`) run inside the API container, so they use the
+same interpreter, dependencies, and network as the deployed service and need no
+host Python.
+
+Tests need the stack running; they create and migrate a separate `raise_test`
+database beside it, so the local release data is never touched.
 
 ```powershell
-Set-Location apps/web
-Copy-Item .env.example .env.local
-npm ci
-npm run dev
+python -m pytest -q
 ```
-
-SQLite and local object storage are development-only. Pilot and production
-startup fail closed unless PostgreSQL, the exact Alembic head, Supabase private
-storage, authentication, origins, consent/retention settings, provider
-credentials, and model allowlists are valid.
 
 ## Required pre-deployment gates
 
