@@ -946,7 +946,7 @@ svg {
   padding-bottom: 18px;
 }
 
-.stage-indicator span {
+.stage-indicator > .dot {
   animation: pulse 1.2s infinite;
   background: var(--leaf-500);
   border-radius: 50%;
@@ -2094,40 +2094,257 @@ svg {
   }
 }
 
-/* Thinking indicator -------------------------------------------------------
-   The pipeline genuinely has stages, so the bold line names the real one and
-   the rotating line describes the work. Both are announced politely rather
-   than interrupting a screen reader on every rotation. */
-.stage-indicator {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
+/* ==========================================================================
+   Design pass: give the product a spine.
+
+   The previous look was a light rail on a light canvas with tinted bubbles —
+   everything at one visual level, which reads as a prototype. The chrome now
+   carries the deep canopy so the workspace has a clear frame, content sits on
+   white paper, and clay marks the one action to take.
+   ========================================================================== */
+
+/* Navigation rail --------------------------------------------------------- */
+.history-rail {
+  background: linear-gradient(180deg, var(--forest-900) 0%, var(--forest-950) 100%);
+  border-inline-end: 0;
+  box-shadow: inset -1px 0 0 rgb(255 255 255 / 6%);
+  color: var(--forest-100);
 }
 
-.stage-copy {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.35;
-  min-width: 0;
+[dir="rtl"] .history-rail {
+  box-shadow: inset 1px 0 0 rgb(255 255 255 / 6%);
 }
 
-.stage-copy strong {
-  color: var(--forest-800);
-  font-size: 0.85rem;
+.history-rail .wordmark strong {
+  color: #fff;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.history-rail .icon-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--forest-300);
+}
+
+.history-rail .icon-button:hover {
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+.history-rail .search-box {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  color: var(--forest-100);
+}
+
+.history-rail .search-box input {
+  background: transparent;
+  color: #fff;
+}
+
+.history-rail .search-box input::placeholder {
+  color: rgb(216 237 227 / 55%);
+}
+
+.history-rail .rail-label-toggle {
+  color: rgb(216 237 227 / 62%);
+}
+
+.history-rail .rail-label-toggle:hover {
+  color: #fff;
+}
+
+/* The primary action is the only clay element in the rail. */
+.new-chat-button {
+  background: var(--clay-500);
+  border: 1px solid var(--clay-600);
+  color: #fff;
   font-weight: 650;
 }
 
-.stage-copy em {
-  color: var(--ink-500);
-  font-size: 0.8rem;
-  font-style: normal;
-  animation: thinking-line-in 420ms ease both;
+.new-chat-button:hover {
+  background: var(--clay-600);
 }
 
-.pending-line {
-  margin: 0;
+.workspace-button {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  color: var(--forest-100);
+}
+
+.workspace-button:hover {
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+}
+
+.conversation-row {
+  color: rgb(216 237 227 / 82%);
+}
+
+.conversation-row:hover,
+.conversation-row.active {
+  background: rgb(255 255 255 / 10%);
+}
+
+.conversation-row.active {
+  box-shadow: inset 3px 0 var(--leaf-500);
+  color: #fff;
+}
+
+[dir="rtl"] .conversation-row.active {
+  box-shadow: inset -3px 0 var(--leaf-500);
+}
+
+.conversation-row .row-menu summary,
+.empty-rail {
+  color: rgb(216 237 227 / 55%);
+}
+
+/* Every rail child audited for contrast on the dark ground. */
+.rail-account {
+  background: rgb(255 255 255 / 6%);
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  color: var(--forest-100);
+}
+
+.rail-account strong,
+.history-rail strong {
+  color: #fff;
+}
+
+.rail-account small,
+.history-rail small {
+  color: rgb(216 237 227 / 60%);
+}
+
+.history-rail .avatar {
+  background: var(--leaf-500);
+  color: var(--forest-950);
+  font-weight: 700;
+}
+
+.history-rail .brand-mark {
+  background: var(--leaf-500);
+  color: var(--forest-950);
+}
+
+/* Popovers stay on paper; they are content, not chrome. */
+.history-rail .menu-popover {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  color: var(--ink-900);
+}
+
+.history-rail .menu-popover button {
+  color: var(--ink-900);
+}
+
+.history-rail .menu-popover .danger-text {
+  color: var(--danger);
+}
+
+.history-rail .rail-new {
+  background: rgb(255 255 255 / 8%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  color: var(--forest-100);
+}
+
+/* Canvas and header ------------------------------------------------------- */
+body {
+  background: var(--paper);
+}
+
+.top-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+
+.top-bar strong,
+.top-bar h1 {
+  color: var(--forest-900);
+  font-size: 1.02rem;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+}
+
+.top-bar small,
+.top-bar .eyebrow {
   color: var(--ink-500);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+}
+
+/* Message column ---------------------------------------------------------- */
+.message.user .message-body {
+  background: var(--forest-800);
+  border: 1px solid var(--forest-800);
+  color: #fff;
+}
+
+.message.user .message-body .markdown-body,
+.message.user .message-body .markdown-body strong {
+  color: #fff;
+}
+
+/* The assistant answer is the document: white paper, a canopy edge, and real
+   definition rather than a wash of green. */
+.message.assistant .message-body {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--forest-700);
+  border-radius: 4px 14px 14px 4px;
+  box-shadow: var(--shadow-sm);
+  padding: 14px 18px;
+}
+
+[dir="rtl"] .message.assistant .message-body {
+  border-radius: 14px 4px 4px 14px;
+}
+
+.composer-area {
+  background: linear-gradient(to top, var(--paper) 68%, rgb(250 247 240 / 0%));
+}
+
+.composer-box {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.composer-box:focus-within {
+  border-color: var(--forest-500);
+  box-shadow: var(--shadow), var(--focus-ring);
+}
+
+/* Thinking indicator ------------------------------------------------------ */
+.thinking {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
+.thinking-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thinking-copy strong {
+  color: var(--forest-800);
   font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.thinking-copy em {
+  color: var(--ink-500);
+  font-size: 0.84rem;
+  font-style: normal;
   animation: thinking-line-in 420ms ease both;
 }
 
@@ -2139,7 +2356,8 @@ svg {
 .thinking-dots {
   display: inline-flex;
   flex: none;
-  gap: 3px;
+  gap: 4px;
+  padding-top: 7px;
 }
 
 .thinking-dots i {
@@ -2160,8 +2378,7 @@ svg {
 
 @media (prefers-reduced-motion: reduce) {
   .thinking-dots i,
-  .stage-copy em,
-  .pending-line {
+  .thinking-copy em {
     animation: none;
   }
 

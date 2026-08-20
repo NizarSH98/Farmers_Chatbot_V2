@@ -1290,9 +1290,17 @@ export function ChatWorkspace() {
                       </ReactMarkdown>
                     </div>
                     {message.pending && !message.content && (
-                      <p className="pending-line">
-                        {thinkingLines(language)[thinkingIndex]}
-                      </p>
+                      <div aria-live="polite" className="thinking">
+                        <span aria-hidden="true" className="thinking-dots">
+                          <i /><i /><i />
+                        </span>
+                        <span className="thinking-copy">
+                          <strong>{stageLabel}</strong>
+                          <em key={thinkingIndex}>
+                            {thinkingLines(language)[thinkingIndex]}
+                          </em>
+                        </span>
+                      </div>
                     )}
                     {message.warning && (
                       <div className="warning-box"><strong>{text("warning")}</strong>{message.warning}</div>
@@ -1481,19 +1489,7 @@ export function ChatWorkspace() {
                   </div>
                 </article>
               ))}
-              {sending && statusStage && (
-                <div aria-live="polite" className="stage-indicator">
-                  <span className="thinking-dots" aria-hidden="true">
-                    <i /><i /><i />
-                  </span>
-                  <span className="stage-copy">
-                    <strong>{stageLabel}</strong>
-                    <em key={thinkingIndex}>
-                      {thinkingLines(language)[thinkingIndex]}
-                    </em>
-                  </span>
-                </div>
-              )}
+
               <div ref={endRef} />
             </div>
           )}
