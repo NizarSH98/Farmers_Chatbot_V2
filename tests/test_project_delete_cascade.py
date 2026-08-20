@@ -1,13 +1,13 @@
 import pytest
+from conftest import new_pilot_store
 
 from farmers_chatbot.artifacts import ArtifactService
 from farmers_chatbot.auth import UserIdentity
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 
 
 def test_project_deletion_removes_artifact_record_and_private_path(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / "private")
     user = store.upsert_user(
         UserIdentity(

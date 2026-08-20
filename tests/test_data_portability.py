@@ -1,7 +1,10 @@
 import hashlib
+import shutil
+
+import pytest
+from conftest import new_pilot_store
 
 from farmers_chatbot.auth import UserIdentity
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 from scripts.pilot_data_portability import (
     export_backup,
@@ -9,9 +12,16 @@ from scripts.pilot_data_portability import (
     verify_backup,
 )
 
+# pg_dump is an external binary, not a Python dependency. When it is missing the
+# backup path cannot be exercised at all, so skip rather than report a failure.
+pytestmark = pytest.mark.skipif(
+    shutil.which(__import__("os").getenv("PG_DUMP_BIN", "pg_dump")) is None,
+    reason="pg_dump is not installed; install PostgreSQL client tools to run this",
+)
+
 
 def test_export_verify_and_restore_preserves_database_and_private_files(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / 'pilot.sqlite3')
+    store = new_pilot_store()
     source_storage = LocalPrivateStorage(tmp_path / 'source-files')
     user = store.upsert_user(
         UserIdentity(
@@ -72,7 +82,7 @@ def test_export_verify_and_restore_preserves_database_and_private_files(tmp_path
 
 
 def test_verifier_detects_changed_database_backup(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / 'pilot.sqlite3')
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / 'source-files')
     export_dir = tmp_path / 'export'
     export_backup(export_dir, store, storage)

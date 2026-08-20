@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from conftest import new_pilot_store
 
 from farmers_chatbot.assistant_contracts import TurnCommand, TurnResult
 from farmers_chatbot.auth import UserIdentity
@@ -60,7 +61,7 @@ def test_fifty_concurrent_reservations_cannot_exceed_limits(
     monkeypatch.setattr(store_module, "MAX_QUERIES_PER_USER_DAY", 12)
     monkeypatch.setattr(store_module, "MAX_PILOT_QUERIES_PER_DAY", 100)
     monkeypatch.setattr(store_module, "MAX_USER_WEEKLY_COST_USD", 100.0)
-    store = PilotStore(sqlite_path=tmp_path / "concurrent.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
 
@@ -77,13 +78,13 @@ def test_fifty_concurrent_reservations_cannot_exceed_limits(
     assert sum(result.allowed for result in results) == 12
     with store._connect() as connection:
         assert (
-            connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 12
+            connection.execute("SELECT COUNT(*) AS n FROM query_events").fetchone()["n"] == 12
         )
         assert (
-            connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0]
+            connection.execute("SELECT COUNT(*) AS n FROM assistant_turns").fetchone()["n"]
             == 12
         )
-        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 12
+        assert connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 12
     store.close()
 
 
@@ -93,7 +94,7 @@ def test_fifty_duplicate_keys_create_one_turn_and_one_reservation(
     import farmers_chatbot.pilot_store as store_module
 
     monkeypatch.setattr(store_module, "PILOT_COOLDOWN_SECONDS", 0)
-    store = PilotStore(sqlite_path=tmp_path / "duplicates.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
     command = _command(actor_id, conversation_id, 1)
@@ -106,18 +107,18 @@ def test_fifty_duplicate_keys_create_one_turn_and_one_reservation(
     assert sum(not result.existing for result in results) == 1
     with store._connect() as connection:
         assert (
-            connection.execute("SELECT COUNT(*) FROM query_events").fetchone()[0] == 1
+            connection.execute("SELECT COUNT(*) AS n FROM query_events").fetchone()["n"] == 1
         )
         assert (
-            connection.execute("SELECT COUNT(*) FROM assistant_turns").fetchone()[0]
+            connection.execute("SELECT COUNT(*) AS n FROM assistant_turns").fetchone()["n"]
             == 1
         )
-        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"] == 1
     store.close()
 
 
 def test_reused_key_with_different_payload_is_rejected(tmp_path) -> None:
-    store = PilotStore(sqlite_path=tmp_path / "conflict.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
     original = _command(actor_id, conversation_id, 1)
@@ -148,7 +149,7 @@ def _result() -> TurnResult:
 
 
 def test_failure_cannot_replace_a_completed_terminal_turn(tmp_path) -> None:
-    store = PilotStore(sqlite_path=tmp_path / "completed-terminal.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
     command = _command(actor_id, conversation_id, 1)
@@ -178,7 +179,7 @@ def test_failure_cannot_replace_a_completed_terminal_turn(tmp_path) -> None:
 
 
 def test_completion_cannot_replace_a_cancelled_terminal_turn(tmp_path) -> None:
-    store = PilotStore(sqlite_path=tmp_path / "cancelled-terminal.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
     command = _command(actor_id, conversation_id, 1)
@@ -209,7 +210,7 @@ def test_completion_cannot_replace_a_cancelled_terminal_turn(tmp_path) -> None:
 
 
 def test_clarification_interaction_survives_finalization_and_reload(tmp_path) -> None:
-    store = PilotStore(sqlite_path=tmp_path / "clarification.sqlite3")
+    store = new_pilot_store()
     actor_id, conversation_id = _workspace(store)
     coordinator = TurnCoordinator(store)
     command = _command(actor_id, conversation_id, 1)

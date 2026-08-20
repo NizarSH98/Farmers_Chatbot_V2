@@ -182,7 +182,6 @@ PRIVACY_CONTACT_EMAIL = os.getenv(
     "privacy-contact-not-configured@example.invalid",
 ).strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-LOCAL_PILOT_DB_PATH = Path(os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"))
 LOCAL_FILE_ROOT = Path(os.getenv("LOCAL_FILE_ROOT", "data/pilot_files"))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_PUBLISHABLE_KEY = os.getenv(
@@ -220,7 +219,6 @@ EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 MAX_QUERIES_PER_SESSION = int(os.getenv("MAX_QUERIES_PER_SESSION", "25"))
 MAX_QUERIES_PER_DAY_GLOBAL = int(os.getenv("MAX_QUERIES_PER_DAY_GLOBAL", "300"))
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "3"))
-RUNTIME_DB_PATH = os.getenv("RUNTIME_DB_PATH", "data/runtime.sqlite3")
 
 MAX_QUERIES_PER_USER_DAY = int(os.getenv("MAX_QUERIES_PER_USER_DAY", "30"))
 MAX_PILOT_QUERIES_PER_DAY = int(os.getenv("MAX_PILOT_QUERIES_PER_DAY", "500"))

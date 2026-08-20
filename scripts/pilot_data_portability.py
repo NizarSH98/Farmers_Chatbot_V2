@@ -158,26 +158,15 @@ def export_backup(
 
     database: dict | None = None
     if include_database:
-        if store.is_postgres:
-            dump_path = output_dir / 'database.dump'
-            _dump_postgres(database_dump_url or store.database_url, dump_path)
-            database = {
-                'engine': 'postgresql',
-                'backup_path': dump_path.name,
-                'format': 'pg_dump-custom',
-                'size_bytes': dump_path.stat().st_size,
-                'sha256': _sha256_file(dump_path),
-            }
-        else:
-            dump_path = output_dir / 'database.sqlite3'
-            _dump_sqlite(store.sqlite_path, dump_path)
-            database = {
-                'engine': 'sqlite',
-                'backup_path': dump_path.name,
-                'format': 'sqlite-backup',
-                'size_bytes': dump_path.stat().st_size,
-                'sha256': _sha256_file(dump_path),
-            }
+        dump_path = output_dir / 'database.dump'
+        _dump_postgres(database_dump_url or store.database_url, dump_path)
+        database = {
+            'engine': 'postgresql',
+            'backup_path': dump_path.name,
+            'format': 'pg_dump-custom',
+            'size_bytes': dump_path.stat().st_size,
+            'sha256': _sha256_file(dump_path),
+        }
 
     manifest = {
         'format': 'raise-esdu-pilot-portability',

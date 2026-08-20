@@ -3,13 +3,14 @@ import time
 import zipfile
 
 import pytest
+from conftest import new_pilot_store
 from openpyxl import load_workbook
 
 from farmers_chatbot import auth
 from farmers_chatbot.artifacts import ArtifactService
 from farmers_chatbot.auth import IdentityError, UserIdentity
 from farmers_chatbot.documents import DocumentService
-from farmers_chatbot.pilot_store import PilotStore, hash_external_identity
+from farmers_chatbot.pilot_store import hash_external_identity
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 
 
@@ -22,19 +23,6 @@ def _identity(subject: str, email: str) -> UserIdentity:
         name=email.split("@")[0],
         is_admin=False,
     )
-
-
-def test_explicit_sqlite_path_never_inherits_configured_database_url(
-    monkeypatch,
-    tmp_path,
-):
-    monkeypatch.setattr(
-        "farmers_chatbot.pilot_store.DATABASE_URL",
-        "postgresql://production.example/raise",
-    )
-    store = PilotStore(sqlite_path=tmp_path / "isolated.sqlite3")
-    assert store.database_url == ""
-    assert not store.is_postgres
 
 
 def test_verified_google_identity_and_authorization_policies(monkeypatch):
@@ -63,7 +51,7 @@ def test_verified_google_identity_and_authorization_policies(monkeypatch):
 
 
 def test_workspace_ownership_isolation_and_attachment_cleanup(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     first = store.upsert_user(_identity("one", "one@example.org"))
     second = store.upsert_user(_identity("two", "two@example.org"))
     project_id = store.create_project(first["id"], "Farm A", "Use field records.")
@@ -92,7 +80,7 @@ def test_workspace_ownership_isolation_and_attachment_cleanup(tmp_path):
 
 
 def test_documents_are_scoped_and_executables_are_rejected(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / "private")
     user = store.upsert_user(_identity("one", "one@example.org"))
     project_id = store.create_project(user["id"], "Potato season")
@@ -119,7 +107,7 @@ def test_documents_are_scoped_and_executables_are_rejected(tmp_path):
 
 
 def test_docx_and_xlsx_artifacts_open_and_include_controls(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / "private")
     user = store.upsert_user(_identity("one", "one@example.org"))
     service = ArtifactService(store, storage, owner_user_id=user["id"])

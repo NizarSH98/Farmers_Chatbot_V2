@@ -23,7 +23,12 @@ from sklearn.pipeline import FeatureUnion
 from sklearn.preprocessing import normalize
 
 from .config import MAX_PROJECT_FILE_BYTES, MAX_PROJECT_FILES
-from .graph_ingestion import ProjectChunkRecord, normalize_search_text
+from .graph_ingestion import (
+    ProjectChunkRecord,
+    content_sha256,
+    normalize_search_text,
+    stable_id,
+)
 from .graph_repository import GraphRepository
 from .language import detect_language
 from .pilot_store import PilotStore
@@ -291,33 +296,37 @@ class DocumentService:
                 size_bytes=len(data),
                 chunks=chunks,
             )
-            if self.store.is_postgres:
-                records = tuple(
-                    ProjectChunkRecord(
-                        id=str(item["id"]),
-                        owner_user_id=owner_user_id,
-                        project_id=project_id,
-                        document_id=document_id,
-                        chunk_index=int(item["chunk_index"]),
-                        content=str(item["text_content"]),
-                        normalized_content=normalize_search_text(
-                            str(item["text_content"])
-                        ),
-                        contextualized_content=(
-                            f"{cleaned_name}\n\n{item['text_content']}"
-                        ),
-                        content_hash=hashlib.sha256(
-                            str(item["text_content"]).encode("utf-8")
-                        ).hexdigest(),
-                        language=detect_language(str(item["text_content"])),
-                        metadata={"filename": cleaned_name},
-                    )
-                    for item in self.store.list_project_chunks(
-                        owner_user_id, project_id
-                    )
-                    if str(item["document_id"]) == document_id
+            records = tuple(
+                ProjectChunkRecord(
+                    # The projection requires content-addressed IDs so a repeated
+                    # upload is idempotent. The workspace row ID is random.
+                    id=stable_id(
+                        "project_chunk",
+                        document_id,
+                        int(item["chunk_index"]),
+                        content_sha256(str(item["text_content"])),
+                    ),
+                    owner_user_id=owner_user_id,
+                    project_id=project_id,
+                    document_id=document_id,
+                    chunk_index=int(item["chunk_index"]),
+                    content=str(item["text_content"]),
+                    normalized_content=normalize_search_text(
+                        str(item["text_content"])
+                    ),
+                    contextualized_content=(
+                        f"{cleaned_name}\n\n{item['text_content']}"
+                    ),
+                    content_hash=content_sha256(str(item["text_content"])),
+                    language=detect_language(str(item["text_content"])),
+                    metadata={"filename": cleaned_name},
                 )
-                GraphRepository(self.store._connect).upsert_project_chunks(records)
+                for item in self.store.list_project_chunks(
+                    owner_user_id, project_id
+                )
+                if str(item["document_id"]) == document_id
+            )
+            GraphRepository(self.store._connect).upsert_project_chunks(records)
             return document_id
         except Exception:
             self.storage.delete(storage_path)

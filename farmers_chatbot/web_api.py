@@ -162,10 +162,7 @@ class FeedbackRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = validate_web_runtime()
-    store = PilotStore(
-        database_url=settings.database_url,
-        sqlite_path=os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"),
-    )
+    store = PilotStore(database_url=settings.database_url)
     storage = configured_file_storage()
     # Only project-owner-approved release content is eligible outside internal
     # scopes. Draft states stay reachable to editors through the admin APIs.
@@ -189,7 +186,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rag_backend = os.getenv("RAG_BACKEND", "postgres").strip().lower()
     if rag_backend not in {"legacy", "postgres", "qdrant"}:
         raise RuntimeError("RAG_BACKEND must be one of legacy, postgres, or qdrant")
-    if store.is_postgres and rag_backend != "legacy":
+    if rag_backend != "legacy":
         vector_approved = (
             os.getenv("RAG_VECTOR_BENCHMARK_APPROVED", "false").lower() == "true"
         )
@@ -363,7 +360,7 @@ async def healthz(request: Request) -> dict[str, Any]:
     result: dict[str, Any] = {
         "status": "ok",
         "service": "raise-web-api",
-        "database_backend": "postgres" if services.store.is_postgres else "sqlite",
+        "database_backend": "postgres",
         "expected_migration_revision": EXPECTED_DATABASE_REVISION,
         "rag_backend": os.getenv("RAG_BACKEND", "postgres").strip().lower(),
         "active_release_id": None,
@@ -372,9 +369,6 @@ async def healthz(request: Request) -> dict[str, Any]:
         "fallback_ready": True,
         "local_model_available": False,
     }
-    if not services.store.is_postgres:
-        result["migration_revision"] = "sqlite-development"
-        return result
     try:
         with services.store._connect() as connection:
             revision = connection.execute(
@@ -1343,13 +1337,6 @@ def _require_admin(user: CurrentUser) -> None:
         raise HTTPException(status_code=403, detail="Administrator access required")
 
 
-def _require_postgres_store(services: WebServices) -> None:
-    if not services.store.is_postgres:
-        raise HTTPException(
-            status_code=503, detail="Knowledge administration requires PostgreSQL"
-        )
-
-
 def _is_editor(services: WebServices, user: CurrentUser) -> bool:
     if user.record.get("role") == "admin":
         return True
@@ -1401,7 +1388,6 @@ async def admin_list_releases(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     with services.store._connect() as connection:
         rows = connection.execute(
             """
@@ -1434,7 +1420,6 @@ async def admin_activate_release(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     projection = await _activate_qdrant_aliases(services, release_id)
     try:
         result = await asyncio.to_thread(
@@ -1461,7 +1446,6 @@ async def admin_rollback_release(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     with services.store._connect() as connection:
         current = connection.execute(
             "SELECT release_id FROM active_knowledge_releases WHERE deployment_scope=%s",
@@ -1509,7 +1493,6 @@ async def admin_graph_neighborhood(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     repository = GraphRepository(services.store._connect)
     release_id = await asyncio.to_thread(repository.active_release, "pilot")
     if not release_id:
@@ -1536,7 +1519,6 @@ async def admin_assign_editor(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     with services.store._connect() as connection:
         row = connection.execute(
             "SELECT id FROM users WHERE id=%s", (body.user_id,)
@@ -1562,7 +1544,6 @@ async def editor_create_proposal(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> dict[str, Any]:
     services = _services(request)
-    _require_postgres_store(services)
     if not await asyncio.to_thread(_is_editor, services, user):
         raise HTTPException(status_code=403, detail="Editor access required")
     proposal_id = f"proposal_{uuid.uuid4().hex}"
@@ -1602,7 +1583,6 @@ async def editor_list_proposals(
     ),
 ) -> dict[str, Any]:
     services = _services(request)
-    _require_postgres_store(services)
     if not await asyncio.to_thread(_is_editor, services, user):
         raise HTTPException(status_code=403, detail="Editor access required")
     with services.store._connect() as connection:
@@ -1622,7 +1602,6 @@ async def admin_review_proposal(
 ) -> dict[str, Any]:
     _require_admin(user)
     services = _services(request)
-    _require_postgres_store(services)
     if body.state == "accepted" and not body.proposed_release_id:
         raise HTTPException(
             status_code=409,

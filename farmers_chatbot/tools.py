@@ -10,8 +10,8 @@ from .artifacts import ArtifactService, convert_agricultural_units
 from .config import TRUSTED_SEARCH_MAX_CALLS
 from .documents import search_project_chunks
 from .language import detect_language
+from .logframe import load_logframe_status
 from .release_knowledge import ReleaseKnowledgeGateway, ReleaseUnavailable
-from .storage import EvidenceStore, load_logframe_status
 from .trusted_sources import TrustedSourceClient
 
 
@@ -19,14 +19,14 @@ class ToolRegistry:
     def __init__(
         self,
         knowledge: ReleaseKnowledgeGateway,
-        evidence_store: Any | None = None,
+        evidence_store: Any,
         *,
         project_chunks: list[dict[str, Any]] | None = None,
         trusted_client: TrustedSourceClient | None = None,
         artifact_service: ArtifactService | None = None,
     ) -> None:
         self.knowledge = knowledge
-        self.evidence_store = evidence_store or EvidenceStore()
+        self.evidence_store = evidence_store
         self.project_chunks = project_chunks or []
         self.trusted_client = trusted_client
         self.artifact_service = artifact_service

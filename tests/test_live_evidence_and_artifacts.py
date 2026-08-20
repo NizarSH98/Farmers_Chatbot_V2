@@ -2,11 +2,11 @@ import io
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from conftest import new_pilot_store
 from openpyxl import load_workbook
 
 from farmers_chatbot.artifacts import ArtifactService
 from farmers_chatbot.auth import UserIdentity
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 from farmers_chatbot.tools import ToolRegistry
 from farmers_chatbot.trusted_sources import (
@@ -77,7 +77,7 @@ def _identity() -> UserIdentity:
 
 
 def _artifact_service(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / "private")
     user = store.upsert_user(_identity())
     return store, storage, user, ArtifactService(

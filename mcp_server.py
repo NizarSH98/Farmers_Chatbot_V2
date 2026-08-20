@@ -25,13 +25,11 @@ from farmers_chatbot.documents import search_project_chunks
 from farmers_chatbot.graph_repository import GraphRepository
 from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.release_knowledge import ReleaseKnowledgeGateway
-from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.storage_backends import configured_file_storage
 from farmers_chatbot.tools import ToolRegistry
 from farmers_chatbot.trusted_sources import TrustedSourceClient
 from farmers_chatbot.turn_coordinator import TurnCoordinator
 
-store = EvidenceStore()
 pilot_store = PilotStore()
 if not pilot_store.is_postgres:
     raise SystemExit(
@@ -55,7 +53,7 @@ trusted_client = TrustedSourceClient(
 )
 registry = ToolRegistry(
     knowledge,
-    store,
+    pilot_store,
     trusted_client=trusted_client,
     artifact_service=artifact_service,
 )
@@ -122,7 +120,7 @@ def ask_raise(
 
     turn_registry = ToolRegistry(
         knowledge,
-        store,
+        pilot_store,
         project_chunks=project_chunks,
         trusted_client=trusted_client,
         artifact_service=artifact_service,

@@ -25,9 +25,6 @@ pytestmark = pytest.mark.asyncio(loop_scope="function")
 @pytest_asyncio.fixture()
 async def client() -> AsyncIterator[httpx.AsyncClient]:
     with tempfile.TemporaryDirectory(prefix="raise_test_") as td:
-        db_path = os.path.join(td, "web.sqlite3")
-        os.environ["LOCAL_PILOT_DB_PATH"] = db_path
-
         import importlib
 
         import farmers_chatbot.config
@@ -37,15 +34,14 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
         app = web_mod.app
 
         # Manually set up services (lifespan is not triggered by ASGITransport)
-        from conftest import FakeReleaseKnowledge
+        from conftest import FakeReleaseKnowledge, new_pilot_store
 
         from farmers_chatbot.assistant_pipeline import AsyncAssistantPipeline
-        from farmers_chatbot.pilot_store import PilotStore
         from farmers_chatbot.storage_backends import LocalPrivateStorage
         from farmers_chatbot.supabase_auth import SupabaseAuthClient
         from farmers_chatbot.trusted_sources import TrustedSourceClient
 
-        store = PilotStore(sqlite_path=db_path)
+        store = new_pilot_store()
         storage = LocalPrivateStorage(root=os.path.join(td, "files"))
         knowledge = FakeReleaseKnowledge()
         trusted = TrustedSourceClient(None, enabled=False)

@@ -10,14 +10,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from farmers_chatbot.storage import EvidenceStore
+from farmers_chatbot.pilot_store import PilotStore
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--database",
-        default=os.getenv("RUNTIME_DB_PATH", "data/runtime.sqlite3"),
+        default=os.getenv("DATABASE_URL", ""),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -40,7 +40,7 @@ def main() -> int:
 
     subparsers.add_parser("summary")
     args = parser.parse_args()
-    store = EvidenceStore(args.database)
+    store = PilotStore(database_url=args.database or None)
     if args.command == "list":
         print(
             json.dumps(

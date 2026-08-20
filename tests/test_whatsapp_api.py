@@ -4,13 +4,12 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from conftest import FakeReleaseKnowledge
+from conftest import FakeReleaseKnowledge, new_pilot_store
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import farmers_chatbot.whatsapp_router as whatsapp_api
 from farmers_chatbot.assistant_contracts import TurnResult
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 from farmers_chatbot.trusted_sources import TrustedSourceClient
 from farmers_chatbot.turn_coordinator import TurnCoordinator
@@ -54,7 +53,7 @@ def test_webhook_verification_signature_dedup_and_private_identity(
     monkeypatch,
     tmp_path,
 ):
-    pilot_store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    pilot_store = new_pilot_store()
     services = _services(tmp_path, pilot_store)
     monkeypatch.setattr(whatsapp_api, "META_APP_SECRET", "app-secret")
     monkeypatch.setattr(whatsapp_api, "META_VERIFY_TOKEN", "verify-token")
@@ -199,7 +198,7 @@ def test_delivery_retry_reuses_persisted_turn_without_provider_rerun(
     monkeypatch,
     tmp_path,
 ):
-    pilot_store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    pilot_store = new_pilot_store()
     services = _services(tmp_path, pilot_store)
     monkeypatch.setattr(whatsapp_api, "META_APP_SECRET", "app-secret")
     monkeypatch.setattr(whatsapp_api, "META_VERIFY_TOKEN", "verify-token")

@@ -82,17 +82,13 @@ def test_rejects_revision_mismatch() -> None:
         )
 
 
-def test_postgres_store_does_not_replay_raw_migrations() -> None:
-    store = PilotStore.__new__(PilotStore)
-    store.is_postgres = True
-    store._connect = lambda: pytest.fail("PostgreSQL bootstrap must not connect")
-    store._initialize()
+def test_store_refuses_any_non_postgresql_database_url() -> None:
+    """Schema versioning lives in Alembic, so there is no second backend."""
 
-
-def test_hosted_store_refuses_sqlite_fallback(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-    with pytest.raises(RuntimeError, match="SQLite fallback is disabled"):
-        PilotStore(database_url="", sqlite_path=tmp_path / "pilot.sqlite3")
+    with pytest.raises(RuntimeError, match="requires a PostgreSQL DATABASE_URL"):
+        PilotStore(database_url="sqlite:///data/pilot.sqlite3")
+    with pytest.raises(RuntimeError, match="requires a PostgreSQL DATABASE_URL"):
+        PilotStore(database_url="")
 
 
 def test_hosted_storage_refuses_local_fallback(monkeypatch) -> None:

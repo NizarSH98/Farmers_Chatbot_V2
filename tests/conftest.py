@@ -1,10 +1,8 @@
-from pathlib import Path
 
 import pytest
 
 from farmers_chatbot.knowledge import SearchResult
 from farmers_chatbot.release_knowledge import KnowledgeSearch, ReleaseUnavailable
-from farmers_chatbot.storage import EvidenceStore
 
 
 class FakeReleaseKnowledge:
@@ -69,5 +67,89 @@ def knowledge() -> FakeReleaseKnowledge:
 
 
 @pytest.fixture()
-def store(tmp_path: Path) -> EvidenceStore:
-    return EvidenceStore(tmp_path / "runtime.sqlite3")
+def store():
+    """Evidence/quota persistence, which is now the same PostgreSQL store."""
+
+    created = new_pilot_store()
+    try:
+        yield created
+    finally:
+        created.close()
+
+
+# --- PostgreSQL-backed fixtures -------------------------------------------
+# Anything whose behaviour depends on the database is tested against the real
+# Compose PostgreSQL, not a double. A gateway that only talks to a database
+# cannot be verified by something that is not a database.
+
+import os
+import subprocess
+import sys
+
+import pytest as _pytest
+
+DEFAULT_TEST_DSN = "postgresql://raise:raise-local-only@127.0.0.1:55432/raise_test"
+_TRUNCATE = """
+TRUNCATE users, projects, conversations, messages, documents, document_chunks,
+         artifacts, feedback, query_events, uploads, assistant_turns,
+         provider_calls, whatsapp_events
+RESTART IDENTITY CASCADE
+"""
+_READY: dict[str, str] = {}
+
+
+def test_database_url() -> str:
+    return os.getenv("TEST_DATABASE_URL", DEFAULT_TEST_DSN)
+
+
+def _prepare(dsn: str) -> str:
+    """Create the throwaway test database once per session and migrate it."""
+
+    import psycopg
+
+    head, _, database = dsn.rpartition("/")
+    try:
+        with psycopg.connect(
+            f"{head}/postgres", connect_timeout=8, autocommit=True
+        ) as admin:
+            if not admin.execute(
+                "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
+            ).fetchone():
+                admin.execute(f'CREATE DATABASE "{database}"')
+    except psycopg.OperationalError as exc:
+        _pytest.skip(f"local PostgreSQL is unavailable: {exc}")
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        env={**os.environ, "DATABASE_URL": dsn},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        _pytest.skip(f"could not migrate the test database: {result.stderr[-400:]}")
+    return dsn
+
+
+def new_pilot_store():
+    """Return a PilotStore on an empty test database.
+
+    Used instead of a fixture so migrating call sites needs no signature change.
+    """
+
+    from farmers_chatbot.pilot_store import PilotStore
+
+    dsn = _READY.get("dsn") or _prepare(test_database_url())
+    _READY["dsn"] = dsn
+    store = PilotStore(database_url=dsn)
+    with store._connect() as connection:
+        connection.execute(_TRUNCATE)
+    return store
+
+
+@_pytest.fixture()
+def pilot_store():
+    store = new_pilot_store()
+    try:
+        yield store
+    finally:
+        store.close()

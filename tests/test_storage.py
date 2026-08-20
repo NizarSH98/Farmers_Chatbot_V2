@@ -1,4 +1,22 @@
+"""Evidence, quota, and feedback behaviour on the shared PostgreSQL store.
+
+These used to run against a second SQLite database. PostgreSQL enforces the
+foreign key from query_events to users, which SQLite did not, so quota and
+telemetry now require a real account.
+"""
+
 import pytest
+
+
+def _user(store) -> str:
+    record = store.upsert_supabase_user(
+        auth_user_id="auth-storage-1",
+        email="tester@example.org",
+        name="Tester",
+        google_subject=None,
+        is_admin=False,
+    )
+    return str(record["id"])
 
 
 def test_feedback_validation(store):
@@ -19,10 +37,11 @@ def test_feedback_validation(store):
 
 
 def test_performance_summary_updates_reserved_query(store):
-    result = store.check_rate_limit("session-a")
-    assert result.allowed
+    user_id = _user(store)
+    # check_rate_limit reserves the event; complete_query matches it by mode.
+    assert store.check_rate_limit(user_id, "quick").allowed
     store.complete_query(
-        "session-a",
+        user_id,
         mode="quick",
         language="english",
         duration_ms=240,
@@ -32,6 +51,13 @@ def test_performance_summary_updates_reserved_query(store):
     assert summary["measured_queries"] == 1
     assert summary["median_response_ms"] == 240
     assert summary["success_percent"] == 100.0
+
+
+def test_quota_events_require_a_real_account(store):
+    """The SQLite store accepted orphan session IDs; PostgreSQL must not."""
+
+    with pytest.raises(Exception, match="(?i)foreign key|violates"):
+        store.check_rate_limit("not-a-user", "quick")
 
 
 def test_validated_high_priority_feedback_resolution(store):

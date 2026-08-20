@@ -1,4 +1,5 @@
 import pytest
+from conftest import new_pilot_store
 
 from farmers_chatbot.auth import UserIdentity
 from farmers_chatbot.documents import DocumentService
@@ -9,7 +10,6 @@ from farmers_chatbot.legal import (
     privacy_policy_markdown,
     privacy_policy_markdown_ar,
 )
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 
 
@@ -45,7 +45,7 @@ def test_lifecycle_legal_documents_are_reviewable_source_files():
 
 
 def test_user_can_export_and_delete_identity_and_private_content(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     storage = LocalPrivateStorage(tmp_path / "private")
     user = store.upsert_user(
         UserIdentity(

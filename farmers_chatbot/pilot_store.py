@@ -5,14 +5,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
-import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from .auth import UserIdentity
@@ -21,7 +18,6 @@ from .config import (
     DATABASE_POOL_MAX_SIZE,
     DATABASE_POOL_MIN_SIZE,
     DATABASE_URL,
-    LOCAL_PILOT_DB_PATH,
     MAX_ARTIFACTS_PER_USER_DAY,
     MAX_DEEP_QUERIES_PER_USER_DAY,
     MAX_PILOT_QUERIES_PER_DAY,
@@ -93,342 +89,41 @@ _TERMINAL_TURN_STATUSES = {
 class PilotStore:
     """Application persistence that fails closed on ownership checks."""
 
-    def __init__(
-        self,
-        database_url: str | None = None,
-        sqlite_path: str | Path | None = None,
-    ) -> None:
-        # Passing a SQLite path is an explicit local-only choice. This prevents
-        # tests and maintenance scripts from silently using a DATABASE_URL that
-        # happens to be present in the developer's environment.
-        if database_url is None:
-            database_url = "" if sqlite_path is not None else DATABASE_URL
-        self.database_url = database_url.strip()
-        self.sqlite_path = Path(sqlite_path or LOCAL_PILOT_DB_PATH)
-        self.is_postgres = self.database_url.startswith(
-            ("postgres://", "postgresql://")
-        )
-        runtime_environment = os.getenv("APP_ENV", "development").strip().lower()
-        if runtime_environment in {"pilot", "production"} and not self.is_postgres:
+    def __init__(self, database_url: str | None = None) -> None:
+        self.database_url = (database_url if database_url is not None else DATABASE_URL).strip()
+        if not self.database_url.startswith(("postgres://", "postgresql://")):
             raise RuntimeError(
-                "Hosted persistence requires a PostgreSQL DATABASE_URL; "
-                "SQLite fallback is disabled."
+                "PilotStore requires a PostgreSQL DATABASE_URL. The SQLite "
+                "fallback was removed so local and hosted runs share one schema."
             )
-        self._pool: Any | None = None
-        if self.is_postgres:
-            try:
-                from psycopg.rows import dict_row
-                from psycopg_pool import ConnectionPool
-            except ImportError as exc:  # pragma: no cover - deployment dependency
-                raise RuntimeError(
-                    "PostgreSQL support requires psycopg and psycopg-pool"
-                ) from exc
-            self._pool = ConnectionPool(
-                conninfo=self.database_url,
-                min_size=max(1, DATABASE_POOL_MIN_SIZE),
-                max_size=max(DATABASE_POOL_MIN_SIZE, DATABASE_POOL_MAX_SIZE),
-                kwargs={"row_factory": dict_row},
-                open=True,
-            )
-        if not self.is_postgres:
-            self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:  # pragma: no cover - deployment dependency
+            raise RuntimeError(
+                "PostgreSQL support requires psycopg and psycopg-pool"
+            ) from exc
+        self._pool: Any = ConnectionPool(
+            conninfo=self.database_url,
+            min_size=max(1, DATABASE_POOL_MIN_SIZE),
+            max_size=max(DATABASE_POOL_MIN_SIZE, DATABASE_POOL_MAX_SIZE),
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
 
     @contextmanager
     def _connect(self) -> Iterator[Any]:
-        if self.is_postgres:
-            if self._pool is None:  # pragma: no cover - defensive guard
-                raise RuntimeError("PostgreSQL pool is not initialized")
-            with self._pool.connection() as connection:
-                yield connection
-            return
-
-        connection = sqlite3.connect(self.sqlite_path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
+        with self._pool.connection() as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
-
-    def _sql(self, statement: str) -> str:
-        return statement.replace("?", "%s") if self.is_postgres else statement
-
-    def close(self) -> None:
-        if self._pool is not None:
-            self._pool.close()
-
-    def _initialize(self) -> None:
-        if self.is_postgres:
-            # Managed PostgreSQL schemas are versioned by Alembic before service
-            # startup. Replaying raw SQL here hid failed/partial deployments and
-            # mutated production state whenever a store object was constructed.
-            return
-
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    issuer TEXT NOT NULL,
-                    subject TEXT NOT NULL,
-                    auth_user_id TEXT,
-                    email TEXT,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    consent_version TEXT,
-                    consent_at TEXT,
-                    default_mode TEXT NOT NULL DEFAULT 'standard',
-                    created_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL,
-                    UNIQUE (issuer, subject)
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id
-                    ON users(auth_user_id);
-                CREATE TABLE IF NOT EXISTS projects (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    name TEXT NOT NULL,
-                    instructions TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
-                    title TEXT NOT NULL,
-                    channel TEXT NOT NULL DEFAULT 'web',
-                    archived INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated
-                    ON conversations(owner_user_id, updated_at);
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    language TEXT,
-                    mode TEXT,
-                    model TEXT,
-                    status TEXT NOT NULL DEFAULT 'complete',
-                    citations_json TEXT NOT NULL DEFAULT '[]',
-                    tools_json TEXT NOT NULL DEFAULT '[]',
-                    artifacts_json TEXT NOT NULL DEFAULT '[]',
-                    attachments_json TEXT NOT NULL DEFAULT '[]',
-                    interaction_json TEXT NOT NULL DEFAULT '{}',
-                    warning TEXT,
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_messages_conversation
-                    ON messages(conversation_id, created_at);
-                CREATE TABLE IF NOT EXISTS documents (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                    filename TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    storage_path TEXT NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    error_message TEXT,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS document_chunks (
-                    id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-                    chunk_index INTEGER NOT NULL,
-                    text_content TEXT NOT NULL,
-                    UNIQUE(document_id, chunk_index)
-                );
-                CREATE TABLE IF NOT EXISTS artifacts (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-                    conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
-                    artifact_type TEXT NOT NULL,
-                    filename TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    storage_path TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS feedback (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    occurred_at TEXT NOT NULL,
-                    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-                    message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    category TEXT NOT NULL,
-                    rating INTEGER,
-                    comment TEXT NOT NULL,
-                    language TEXT,
-                    consent INTEGER NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'new',
-                    priority TEXT,
-                    release_version TEXT,
-                    verification_note TEXT
-                );
-                CREATE TABLE IF NOT EXISTS query_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    occurred_at TEXT NOT NULL,
-                    day_utc TEXT NOT NULL,
-                    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-                    mode TEXT NOT NULL,
-                    language TEXT,
-                    duration_ms INTEGER,
-                    success INTEGER,
-                    error_type TEXT,
-                    trusted_searches INTEGER NOT NULL DEFAULT 0,
-                    request_id TEXT,
-                    ttft_ms INTEGER,
-                    stage_durations_json TEXT NOT NULL DEFAULT '{}',
-                    prompt_tokens INTEGER,
-                    completion_tokens INTEGER,
-                    estimated_cost_usd REAL,
-                    turn_id TEXT,
-                    payload_sha256 TEXT,
-                    query_status TEXT NOT NULL DEFAULT 'reserved',
-                    reserved_cost_usd REAL NOT NULL DEFAULT 0,
-                    finalized_at TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_pilot_query_day
-                    ON query_events(day_utc);
-                CREATE INDEX IF NOT EXISTS idx_pilot_query_user
-                    ON query_events(user_id, occurred_at);
-                CREATE TABLE IF NOT EXISTS uploads (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    storage_path TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'ready',
-                    created_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_uploads_owner_created
-                    ON uploads(owner_user_id, created_at);
-                CREATE TABLE IF NOT EXISTS assistant_turns (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    status TEXT NOT NULL,
-                    clarification_count INTEGER NOT NULL DEFAULT 0,
-                    analysis_json TEXT NOT NULL DEFAULT '{}',
-                    error_type TEXT,
-                    request_id TEXT,
-                    payload_sha256 TEXT,
-                    channel TEXT NOT NULL DEFAULT 'web',
-                    terminal_sequence INTEGER,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_assistant_turns_conversation
-                    ON assistant_turns(conversation_id, created_at);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_turns_request
-                    ON assistant_turns(owner_user_id, request_id)
-                    WHERE request_id IS NOT NULL;
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_query_events_request
-                    ON query_events(user_id, request_id)
-                    WHERE request_id IS NOT NULL;
-                CREATE TABLE IF NOT EXISTS provider_calls (
-                    id TEXT PRIMARY KEY,
-                    turn_id TEXT NOT NULL REFERENCES assistant_turns(id) ON DELETE CASCADE,
-                    request_id TEXT NOT NULL,
-                    sequence INTEGER NOT NULL,
-                    stage TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    duration_ms INTEGER NOT NULL,
-                    outcome TEXT NOT NULL,
-                    prompt_tokens INTEGER,
-                    completion_tokens INTEGER,
-                    cost_usd REAL,
-                    error_type TEXT,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(turn_id, sequence)
-                );
-                CREATE TABLE IF NOT EXISTS whatsapp_events (
-                    message_id TEXT PRIMARY KEY,
-                    identity_hash TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    error_type TEXT,
-                    received_at TEXT NOT NULL,
-                    completed_at TEXT
-                );
-                """
-            )
-            self._ensure_sqlite_upgrades(connection)
 
     @staticmethod
-    def _ensure_sqlite_upgrades(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(users)")
-        }
-        if "auth_user_id" not in columns:
-            connection.execute("ALTER TABLE users ADD COLUMN auth_user_id TEXT")
-            connection.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id "
-                "ON users(auth_user_id)"
-            )
+    def _sql(statement: str) -> str:
+        """Translate the shared `?` placeholder style to psycopg's `%s`."""
 
-        query_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(query_events)")
-        }
-        additions = {
-            "request_id": "TEXT",
-            "ttft_ms": "INTEGER",
-            "stage_durations_json": "TEXT NOT NULL DEFAULT '{}'",
-            "prompt_tokens": "INTEGER",
-            "completion_tokens": "INTEGER",
-            "estimated_cost_usd": "REAL",
-            "turn_id": "TEXT",
-            "payload_sha256": "TEXT",
-            "query_status": "TEXT NOT NULL DEFAULT 'reserved'",
-            "reserved_cost_usd": "REAL NOT NULL DEFAULT 0",
-            "finalized_at": "TEXT",
-        }
-        for name, definition in additions.items():
-            if name not in query_columns:
-                connection.execute(
-                    f"ALTER TABLE query_events ADD COLUMN {name} {definition}"
-                )
-        turn_columns = {
-            row["name"]
-            for row in connection.execute("PRAGMA table_info(assistant_turns)")
-        }
-        turn_additions = {
-            "request_id": "TEXT",
-            "payload_sha256": "TEXT",
-            "channel": "TEXT NOT NULL DEFAULT 'web'",
-            "terminal_sequence": "INTEGER",
-        }
-        for name, definition in turn_additions.items():
-            if name not in turn_columns:
-                connection.execute(
-                    f"ALTER TABLE assistant_turns ADD COLUMN {name} {definition}"
-                )
-        message_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(messages)")
-        }
-        if "interaction_json" not in message_columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN interaction_json "
-                "TEXT NOT NULL DEFAULT '{}'"
-            )
-        connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_turns_request "
-            "ON assistant_turns(owner_user_id, request_id) "
-            "WHERE request_id IS NOT NULL"
-        )
-        connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_query_events_request "
-            "ON query_events(user_id, request_id) WHERE request_id IS NOT NULL"
-        )
+        return statement.replace("?", "%s")
+
+    def close(self) -> None:
+        self._pool.close()
 
     def upsert_user(self, identity: UserIdentity) -> dict[str, Any]:
         now = utc_now()
@@ -1367,13 +1062,10 @@ class PilotStore:
         """Reserve quota/cost and create the user message + turn exactly once."""
 
         with self._connect() as connection:
-            if self.is_postgres:
-                connection.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    ("raise:turn-reservations",),
-                )
-            else:
-                connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                ("raise:turn-reservations",),
+            )
 
             # Capture quota/cooldown time only after the serialization lock. A
             # timestamp captured before waiting can be older than the preceding
@@ -1753,13 +1445,10 @@ class PilotStore:
 
         now = utc_now()
         with self._connect() as connection:
-            if self.is_postgres:
-                connection.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    (f"raise:turn:{turn_id}",),
-                )
-            else:
-                connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"raise:turn:{turn_id}",),
+            )
             turn = connection.execute(
                 self._sql(
                     """
@@ -1908,13 +1597,10 @@ class PilotStore:
             raise ValueError("Turn failure status must be terminal")
         now = utc_now()
         with self._connect() as connection:
-            if self.is_postgres:
-                connection.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    (f"raise:turn:{turn_id}",),
-                )
-            else:
-                connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"raise:turn:{turn_id}",),
+            )
             turn = connection.execute(
                 self._sql(
                     """
@@ -2440,7 +2126,7 @@ class PilotStore:
             raise ValueError("Unknown feedback category")
         del session_id
         with self._connect() as connection:
-            cursor = connection.execute(
+            connection.execute(
                 self._sql(
                     """
                     INSERT INTO feedback
@@ -2460,10 +2146,59 @@ class PilotStore:
                     1,
                 ),
             )
-            if self.is_postgres:
-                row = connection.execute("SELECT LASTVAL() AS id").fetchone()
-                return int(row["id"])
-            return int(cursor.lastrowid)
+            row = connection.execute("SELECT LASTVAL() AS id").fetchone()
+            return int(row["id"])
+
+    def list_feedback(self, status: str | None = None) -> list[dict[str, Any]]:
+        query = (
+            "SELECT id, occurred_at, category, rating, comment, language, "
+            "status, priority, release_version, verification_note FROM feedback"
+        )
+        parameters: tuple[Any, ...] = ()
+        if status:
+            query += " WHERE status = %s"
+            parameters = (status,)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_feedback(
+        self,
+        feedback_id: int,
+        *,
+        status: str,
+        priority: str | None = None,
+        release_version: str | None = None,
+        verification_note: str | None = None,
+    ) -> None:
+        allowed_statuses = {
+            "new",
+            "validated",
+            "planned",
+            "resolved",
+            "verified",
+            "rejected",
+        }
+        if status not in allowed_statuses:
+            raise ValueError("Unknown feedback status")
+        if priority not in {None, "low", "medium", "high"}:
+            raise ValueError("Priority must be low, medium, or high")
+        note = " ".join((verification_note or "").split()).strip() or None
+        if note and len(note) > 2000:
+            raise ValueError("Verification note must be 2000 characters or fewer")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE feedback
+                SET status = %s, priority = %s, release_version = %s,
+                    verification_note = %s
+                WHERE id = %s
+                """,
+                (status, priority, release_version, note, int(feedback_id)),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Feedback record not found")
 
     def feedback_summary(self) -> dict[str, Any]:
         with self._connect() as connection:
