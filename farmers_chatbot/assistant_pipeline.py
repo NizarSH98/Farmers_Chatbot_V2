@@ -15,6 +15,7 @@ import httpx
 from instructor.core.exceptions import InstructorError
 
 from .assistant_contracts import TurnCommand, TurnEvent, TurnResult
+from .citation_format import CitationRenderer, citation_ids
 from .clarification import (
     ClarificationState,
     ClarificationWorkflow,
@@ -508,13 +509,25 @@ class AssistantEngine:
         else:
             verifier_approved = True
 
+        citations = self._dedupe_citations(
+            [*prepared.citations, *annotations, *tools.recent_citations]
+        )
+        # Replace internal evidence IDs with reader-facing markers before the
+        # text reaches any channel, and record which marker each source got.
+        renderer = CitationRenderer(citation_ids(citations))
+        answer = renderer.rewrite(answer)
+        markers = renderer.numbers
+        for citation in citations:
+            number = markers.get(citation.get("item_id")) or markers.get(
+                citation.get("evidence_id")
+            )
+            if number is not None:
+                citation["marker"] = number
+
         ttft_ms = int((time.perf_counter() - started) * 1000)
         for part in self._display_chunks(answer):
             yield PipelineEvent("content.delta", {"text": part})
 
-        citations = self._dedupe_citations(
-            [*prepared.citations, *annotations, *tools.recent_citations]
-        )
         tools_used = list(dict.fromkeys([*prepared.tools_used, *executed_tools]))
         warnings = [warning] if warning else []
         if warning:

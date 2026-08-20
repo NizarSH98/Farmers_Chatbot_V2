@@ -87,6 +87,13 @@ const initialConfig: AppConfig = {
   models: []
 };
 
+// The backend replaces internal evidence IDs with `[n]`. Render those as
+// anchors so they can be styled as superscripts and scrolled to, rather than
+// appearing as literal bracketed digits in the prose.
+function withCitationMarkers(content: string): string {
+  return content.replace(/\[(\d{1,2})\]/g, (match, digits) => `[${digits}](#cite-${digits})`);
+}
+
 function clarificationQuestions(
   interaction: ClarificationInteraction
 ): ClarificationQuestion[] {
@@ -1194,7 +1201,9 @@ export function ChatWorkspace() {
                     ))}
                     <div className="markdown-body">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.content || (message.pending ? stageLabel : "")}
+                        {message.content
+                          ? withCitationMarkers(message.content)
+                          : message.pending ? stageLabel : ""}
                       </ReactMarkdown>
                     </div>
                     {message.warning && (
@@ -1205,7 +1214,10 @@ export function ChatWorkspace() {
                         <summary><ChevronDown />{text("sources")} ({message.citations.length})</summary>
                         <ol>
                           {message.citations.map((citation, citationIndex) => (
-                            <li key={(citation.url || citation.item_id || "source") + citationIndex}>
+                            <li
+                              id={"cite-" + (citation.marker ?? citationIndex + 1)}
+                              key={(citation.url || citation.item_id || "source") + citationIndex}
+                            >
                               {citation.url ? (
                                 <a href={citation.url} rel="noreferrer" target="_blank">
                                   {citation.title || citation.url}

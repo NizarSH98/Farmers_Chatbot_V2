@@ -80,6 +80,8 @@ export interface Citation {
   document_id?: string;
   status?: string;
   warning?: string;
+  /** 1-based marker the answer text refers to, e.g. the 2 in "[2]". */
+  marker?: number;
   [key: string]: unknown;
 }
 
