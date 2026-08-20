@@ -3,13 +3,12 @@ import json
 import httpx
 import pytest
 
+from farmers_chatbot.assistant_compat import UnifiedAssistantFacade
 from farmers_chatbot.assistant_pipeline import AssistantEngine
 from farmers_chatbot.config import MODE_PROFILES, resolve_model_id
 from farmers_chatbot.llm import (
     AssistantPromptBuilder,
     AssistantRequest,
-    AssistantResponse,
-    AssistantService,
     extract_follow_up_questions,
 )
 from farmers_chatbot.provider import ProviderClient, ProviderResponse, ProviderUsage
@@ -36,42 +35,24 @@ def _messages(builder, knowledge, *, query="current question", mode="standard"):
     )
 
 
-def test_missing_key_compatibility_facade_returns_canonical_fallback(knowledge, store):
-    service = AssistantService(knowledge, ToolRegistry(knowledge, store), api_key="")
-    response = service.answer("What is important about potatoes in Akkar?")
+def test_missing_key_sync_adapter_returns_canonical_fallback(knowledge, store):
+    """Without a provider key the adapter must degrade, not orchestrate itself."""
+
+    facade = UnifiedAssistantFacade(
+        knowledge, ToolRegistry(knowledge, store), api_key=""
+    )
+    response = facade.answer_request(
+        AssistantRequest(
+            user_id="test",
+            channel="mcp",
+            conversation_id="conversation",
+            project_id=None,
+            text="What is important about potatoes in Akkar?",
+        )
+    )
     assert response.sources == []
     assert response.model is None
     assert response.answer
-
-
-def test_assistant_service_is_only_a_unified_facade(monkeypatch, knowledge, store):
-    captured = {}
-
-    def fake_answer(self, request, *, conversation_history=None):
-        del self
-        captured["request"] = request
-        captured["history"] = conversation_history
-        return AssistantResponse(
-            answer="canonical",
-            sources=[],
-            model=None,
-            mode=request.mode,
-            language="english",
-            duration_ms=1,
-        )
-
-    monkeypatch.setattr(
-        "farmers_chatbot.assistant_compat.UnifiedAssistantFacade.answer_request",
-        fake_answer,
-    )
-    service = AssistantService(knowledge, ToolRegistry(knowledge, store), api_key="")
-    response = service.answer(
-        "one request",
-        conversation_history=[{"role": "user", "content": "prior"}],
-    )
-    assert response.answer == "canonical"
-    assert captured["request"].text == "one request"
-    assert captured["history"][0]["content"] == "prior"
 
 
 def test_prompt_builder_does_not_duplicate_current_question(knowledge, store):

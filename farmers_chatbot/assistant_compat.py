@@ -1,4 +1,9 @@
-"""One-release synchronous facade over the canonical asynchronous engine."""
+"""Synchronous adapter over the canonical asynchronous engine.
+
+Used by adapters that cannot be async: the MCP stdio server and the local
+benchmark script. It owns no model or tool orchestration of its own; every turn
+runs through `AssistantEngine`.
+"""
 
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ def _run_sync[T](coroutine: Coroutine[Any, Any, T]) -> T:
 
 
 class UnifiedAssistantFacade:
-    """Compatibility response shape with no independent model/tool orchestration."""
+    """Response shape for sync callers, with no independent orchestration."""
 
     def __init__(
         self,

@@ -22,17 +22,26 @@ from farmers_chatbot.assistant_contracts import TurnCommand
 from farmers_chatbot.auth import development_identity
 from farmers_chatbot.config import ENABLE_TRUSTED_WEB_SEARCH
 from farmers_chatbot.documents import search_project_chunks
-from farmers_chatbot.knowledge import KnowledgeIndex
+from farmers_chatbot.graph_repository import GraphRepository
 from farmers_chatbot.pilot_store import PilotStore
+from farmers_chatbot.release_knowledge import ReleaseKnowledgeGateway
 from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.storage_backends import configured_file_storage
 from farmers_chatbot.tools import ToolRegistry
 from farmers_chatbot.trusted_sources import TrustedSourceClient
 from farmers_chatbot.turn_coordinator import TurnCoordinator
 
-knowledge = KnowledgeIndex.from_directory()
 store = EvidenceStore()
 pilot_store = PilotStore()
+if not pilot_store.is_postgres:
+    raise SystemExit(
+        "The MCP server serves the activated knowledge release, so it requires a "
+        "PostgreSQL DATABASE_URL. Start the local stack with scripts/raise.ps1 start."
+    )
+knowledge = ReleaseKnowledgeGateway(
+    GraphRepository(pilot_store._connect),
+    deployment_scope="pilot",
+)
 file_storage = configured_file_storage()
 mcp_user = pilot_store.upsert_user(development_identity())
 artifact_service = ArtifactService(

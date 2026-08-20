@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import importlib
 import json
 from types import SimpleNamespace
 
@@ -10,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import farmers_chatbot.whatsapp_router as whatsapp_api
-import whatsapp_api as compatibility_wrapper
 from farmers_chatbot.assistant_contracts import TurnResult
 from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
@@ -41,13 +39,6 @@ def _client(services=None) -> TestClient:
         app.state.services = services
     app.include_router(whatsapp_api.router)
     return TestClient(app)
-
-
-def test_root_module_is_only_a_canonical_app_wrapper():
-    from farmers_chatbot.web_api import app as canonical_app
-
-    refreshed = importlib.reload(compatibility_wrapper)
-    assert refreshed.app is canonical_app
 
 
 def test_whatsapp_is_fail_closed_until_explicitly_enabled(monkeypatch):
