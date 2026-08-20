@@ -20,7 +20,7 @@ from farmers_chatbot.tools import ToolRegistry
 def _messages(builder, knowledge, *, query="current question", mode="standard"):
     return builder._build_messages(
         query=query,
-        sources=knowledge.search(query, language="english", top_k=3),
+        sources=knowledge.search(query, language="english", top_k=3).results,
         project_sources=[],
         trusted_context="",
         language="english",

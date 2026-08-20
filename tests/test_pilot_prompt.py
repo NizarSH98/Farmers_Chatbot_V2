@@ -15,7 +15,7 @@ def _build(knowledge, store, *, style="auto", project_instructions=""):
             "Help me decide what to do.",
             language="english",
             top_k=3,
-        ),
+        ).results,
         project_sources=[],
         trusted_context="",
         language="english",

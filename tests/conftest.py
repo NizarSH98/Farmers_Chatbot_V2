@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from farmers_chatbot.knowledge import SearchResult
-from farmers_chatbot.release_knowledge import ReleaseUnavailable
+from farmers_chatbot.release_knowledge import KnowledgeSearch, ReleaseUnavailable
 from farmers_chatbot.storage import EvidenceStore
 
 
@@ -21,10 +21,12 @@ class FakeReleaseKnowledge:
         sources: dict[str, dict] | None = None,
         *,
         available: bool = True,
+        match: str = "exact",
     ) -> None:
         self.results = results if results is not None else [_default_result()]
         self.sources = sources or {"source-1": {"id": "source-1", "title": "Source"}}
         self.available = available
+        self.match = match
 
     def _guard(self) -> None:
         if not self.available:
@@ -36,9 +38,9 @@ class FakeReleaseKnowledge:
         *,
         language: str,
         top_k: int = 5,
-    ) -> list[SearchResult]:
+    ) -> KnowledgeSearch:
         self._guard()
-        return self.results[:top_k]
+        return KnowledgeSearch(results=self.results[:top_k], match=self.match)
 
     def get_source(self, source_id: str) -> dict | None:
         self._guard()

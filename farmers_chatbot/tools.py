@@ -510,7 +510,7 @@ class ToolRegistry:
         if language not in {"arabic", "english"}:
             raise ValueError("language must be arabic or english")
         try:
-            results = self.knowledge.search(
+            found = self.knowledge.search(
                 query,
                 language=language,
                 top_k=max(1, min(int(top_k), 10)),
@@ -526,12 +526,20 @@ class ToolRegistry:
                 ),
                 "results": [],
             }
-        return {
+        payload: dict[str, Any] = {
             "query": query,
             "language": language,
             "available": True,
-            "results": [result.to_dict() for result in results],
+            "match": found.match,
+            "results": [result.to_dict() for result in found.results],
         }
+        if found.match == "broadened" and found.results:
+            payload["warning"] = (
+                "No passage matched every term, so these are partial keyword "
+                "matches. Treat them as weak and do not present them as a "
+                "direct answer unless they clearly address the question."
+            )
+        return payload
 
     def search_project_knowledge(self, query: str, top_k: int = 5) -> dict[str, Any]:
         results = search_project_chunks(

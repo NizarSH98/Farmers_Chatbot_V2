@@ -14,6 +14,8 @@ def test_search_tool_returns_structured_local_results(knowledge, store):
         )
     )
     assert result["available"] is True
+    assert result["match"] == "exact"
+    assert "warning" not in result
     assert result["results"]
     assert all(item["status"] == "approved" for item in result["results"])
     assert all(item["item_id"] for item in result["results"])
@@ -32,6 +34,20 @@ def test_search_tool_refuses_when_no_release_is_active(store):
     assert result["available"] is False
     assert result["results"] == []
     assert "unavailable" in result["warning"]
+
+
+def test_broadened_search_is_labelled_as_a_weak_match(store):
+    from conftest import FakeReleaseKnowledge
+
+    tools = ToolRegistry(FakeReleaseKnowledge(match="broadened"), store)
+    result = json.loads(
+        tools.execute(
+            "search_knowledge",
+            {"query": "when should I irrigate", "language": "english"},
+        )
+    )
+    assert result["match"] == "broadened"
+    assert "partial keyword matches" in result["warning"]
 
 
 def test_unknown_tool_is_rejected(knowledge, store):

@@ -198,11 +198,11 @@ rollout. Plan it as a release event, not a migration.
 
 ## Stages
 
-| Stage | Content |
-|---|---|
-| 0 | Green gates, this plan committed, branch pushed |
-| 1 | Tier 0 legacy-corpus excision |
-| 2 | Tier 1 deletions, one surface per commit, gates between |
+| Stage | Content | State |
+|---|---|---|
+| 0 | Green gates, this plan committed, branch pushed | done |
+| 1 | Tier 0 legacy-corpus excision | done |
+| 2 | Tier 1 deletions, one surface per commit, gates between | Streamlit done; compat shims and era-1 corpus done; WhatsApp wrapper and `mcp_server.py` repoint outstanding |
 | 3 | SQLite and `EvidenceStore` removal, PostgreSQL test fixtures, single local mode, archive script |
 | 4 | Ablation runner and graph profiling |
 | 5 | English/Arabic split and language-gap threshold |

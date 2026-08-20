@@ -8,6 +8,8 @@ answer and be cited. This gateway is the single release-scoped replacement.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from .graph_repository import GraphRepository
@@ -15,9 +17,34 @@ from .knowledge import SearchResult
 
 DEFAULT_REVIEW_STATUSES: tuple[str, ...] = ("approved",)
 
+# The release stores BCP-47-style codes; callers use detect_language() names.
+_LANGUAGE_CODES = {"english": "en", "arabic": "ar"}
+
+# Question scaffolding only. Domain words must never be dropped.
+_STOPWORDS = frozenset(
+    {
+        "and", "are", "can", "did", "does", "for", "from", "has", "have", "how",
+        "should", "that", "the", "their", "them", "there", "these", "this",
+        "was", "were", "what", "when", "where", "which", "who", "why", "will",
+        "with", "you", "your", "about", "into", "than", "then", "they",
+        "في", "من", "على", "الى", "إلى", "عن", "مع", "هل", "ما", "ماذا",
+        "متى", "اين", "أين", "كيف", "لماذا", "التي", "الذي", "هذا", "هذه",
+    }
+)
+
 
 class ReleaseUnavailable(RuntimeError):
     """Raised when no activated knowledge release can serve a lookup."""
+
+
+@dataclass(frozen=True)
+class KnowledgeSearch:
+    """Results plus how strictly they matched, so loose hits stay labelled."""
+
+    results: list[SearchResult]
+    # "exact": every content term matched. "broadened": any term matched, so
+    # relevance is weaker and the caller must not treat hits as confirmation.
+    match: str = "exact"
 
 
 class ReleaseKnowledgeGateway:
@@ -49,23 +76,59 @@ class ReleaseKnowledgeGateway:
         *,
         language: str,
         top_k: int = 5,
-    ) -> list[SearchResult]:
+    ) -> KnowledgeSearch:
         """Lexically search the active release. No vector is supplied here."""
 
+        release_id = self.active_release_id()
+        limit = max(1, min(int(top_k), 10))
+        # Over-fetch so language preference does not starve the result set.
+        fetch = limit * 3
         rows = self.repository.hybrid_search(
-            release_id=self.active_release_id(),
+            release_id=release_id,
             query=query,
             embedding=None,
             embedding_model=None,
             embedding_dimensions=None,
-            # Over-fetch so language preference does not starve the result set.
-            top_k=max(1, min(int(top_k), 10)) * 3,
+            top_k=fetch,
             review_statuses=self.review_statuses,
         )
-        preferred = [row for row in rows if (row.get("language") or "") == language]
+        match = "exact"
+        if not rows:
+            # websearch_to_tsquery ANDs bare terms, so a natural-language
+            # question rarely has a chunk containing every word. The model calls
+            # this tool with questions, not keywords, so widen to OR before
+            # reporting that the release has nothing.
+            broadened = self._or_query(query)
+            if broadened:
+                match = "broadened"
+                rows = self.repository.hybrid_search(
+                    release_id=release_id,
+                    query=broadened,
+                    embedding=None,
+                    embedding_model=None,
+                    embedding_dimensions=None,
+                    top_k=fetch,
+                    review_statuses=self.review_statuses,
+                )
+        code = _LANGUAGE_CODES.get(language, language)
+        preferred = [row for row in rows if (row.get("language") or "") == code]
         selected = preferred or rows
-        limit = max(1, min(int(top_k), 10))
-        return [self._search_result(row) for row in selected[:limit]]
+        return KnowledgeSearch(
+            results=[self._search_result(row) for row in selected[:limit]],
+            match=match if selected else "exact",
+        )
+
+    @staticmethod
+    def _or_query(query: str) -> str:
+        """Rewrite a natural-language question as an OR of its content terms."""
+
+        terms = [
+            term
+            for term in re.findall(r"[^\W\d_]{3,}", query, flags=re.UNICODE)
+            if term.casefold() not in _STOPWORDS
+        ]
+        # A single term already behaves as OR; rewriting adds nothing.
+        return " OR ".join(dict.fromkeys(terms)) if len(terms) > 1 else ""
 
     def get_source(self, source_id: str) -> dict[str, Any] | None:
         return self.repository.source_record(
