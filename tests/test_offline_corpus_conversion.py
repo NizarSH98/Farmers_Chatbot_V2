@@ -69,8 +69,8 @@ def test_docx_conversion_is_offline_bilingual_and_graph_ready(
             input=SOURCE_DOCX,
             output=output,
             arabic_output=arabic_output,
-            guide=ROOT / "knowledge_base" / "guide.json",
-            sources=ROOT / "knowledge_base" / "sources.json",
+            guide=ROOT / "knowledge_base" / "legacy" / "guide.json",
+            sources=ROOT / "knowledge_base" / "legacy" / "sources.json",
         )
     )
 
@@ -88,7 +88,7 @@ def test_docx_conversion_is_offline_bilingual_and_graph_ready(
     legacy_ids = {
         str(item["id"])
         for item in json.loads(
-            (ROOT / "knowledge_base" / "guide.json").read_text(encoding="utf-8")
+            (ROOT / "knowledge_base" / "legacy" / "guide.json").read_text(encoding="utf-8")
         )["items"]
     }
     merged_ids = {
@@ -119,8 +119,8 @@ def test_docx_conversion_is_offline_bilingual_and_graph_ready(
             input=SOURCE_DOCX,
             output=output,
             arabic_output=arabic_output,
-            guide=ROOT / "knowledge_base" / "guide.json",
-            sources=ROOT / "knowledge_base" / "sources.json",
+            guide=ROOT / "knowledge_base" / "legacy" / "guide.json",
+            sources=ROOT / "knowledge_base" / "legacy" / "sources.json",
         )
     )
     assert hashlib.sha256(output.read_bytes()).hexdigest() == canonical_hash

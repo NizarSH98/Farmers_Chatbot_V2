@@ -6,10 +6,10 @@ import json
 import time
 
 import pytest
+from conftest import FakeReleaseKnowledge
 
 from farmers_chatbot.assistant_contracts import TurnCommand
 from farmers_chatbot.assistant_pipeline import AssistantEngine
-from farmers_chatbot.knowledge import KnowledgeIndex
 from farmers_chatbot.provider import ProviderResponse, ProviderUsage
 from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.tool_executor import ToolExecutor
@@ -73,7 +73,7 @@ async def test_tool_executor_reports_total_budget_and_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_offline_high_risk_request_emits_only_safe_refusal(tmp_path) -> None:
-    knowledge = KnowledgeIndex.from_directory()
+    knowledge = FakeReleaseKnowledge()
     tools = ToolRegistry(knowledge, EvidenceStore(tmp_path / "evidence.sqlite3"))
     engine = AssistantEngine(knowledge, api_key="")
     command = TurnCommand(
@@ -146,7 +146,7 @@ class _RejectingProvider:
 
 @pytest.mark.asyncio
 async def test_rejected_high_risk_draft_is_never_streamed(tmp_path) -> None:
-    knowledge = KnowledgeIndex.from_directory()
+    knowledge = FakeReleaseKnowledge()
     tools = ToolRegistry(knowledge, EvidenceStore(tmp_path / "evidence.sqlite3"))
     engine = AssistantEngine(knowledge, provider=_RejectingProvider())  # type: ignore[arg-type]
     command = TurnCommand(

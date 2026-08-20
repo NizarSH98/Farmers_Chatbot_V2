@@ -30,11 +30,16 @@ from .config import (
     resolve_model_id,
 )
 from .documents import ProjectSearchResult
-from .knowledge import KnowledgeIndex, SearchResult
+from .knowledge import SearchResult
 from .language import detect_language
 from .llm import AssistantPromptBuilder, AssistantRequest, extract_follow_up_questions
 from .provider import ProviderClient
-from .retrieval import LegacyHybridRetrieval, RetrievalRequest, RetrievalService
+from .release_knowledge import ReleaseKnowledgeGateway
+from .retrieval import (
+    ProjectOnlyFallbackRetrieval,
+    RetrievalRequest,
+    RetrievalService,
+)
 from .tool_executor import ToolExecutor
 from .tools import ToolRegistry
 from .trusted_sources import requires_live_verification, url_is_trusted
@@ -171,7 +176,7 @@ class PipelineEvent(TurnEvent):
 class AssistantEngine:
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
+        knowledge: ReleaseKnowledgeGateway,
         *,
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
@@ -187,7 +192,7 @@ class AssistantEngine:
             client=client,
         )
         self.api_key = self.provider.api_key
-        self.retrieval = retrieval or LegacyHybridRetrieval(knowledge)
+        self.retrieval = retrieval or ProjectOnlyFallbackRetrieval()
         self.clarification = ClarificationWorkflow(
             os.getenv("CLARIFICATION_DATABASE_URL", ""), self._plan_clarification
         )

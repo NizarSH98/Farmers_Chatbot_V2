@@ -837,8 +837,8 @@ def main() -> None:
         type=Path,
         default=Path("knowledge_base/agrifood_translations_v0.3.json"),
     )
-    parser.add_argument("--guide", type=Path, default=Path("knowledge_base/guide.json"))
-    parser.add_argument("--sources", type=Path, default=Path("knowledge_base/sources.json"))
+    parser.add_argument("--guide", type=Path, default=Path("knowledge_base/legacy/guide.json"))
+    parser.add_argument("--sources", type=Path, default=Path("knowledge_base/legacy/sources.json"))
     args = parser.parse_args()
     try:
         run(args)

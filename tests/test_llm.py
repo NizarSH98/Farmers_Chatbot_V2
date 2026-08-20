@@ -39,7 +39,7 @@ def _messages(builder, knowledge, *, query="current question", mode="standard"):
 def test_missing_key_compatibility_facade_returns_canonical_fallback(knowledge, store):
     service = AssistantService(knowledge, ToolRegistry(knowledge, store), api_key="")
     response = service.answer("What is important about potatoes in Akkar?")
-    assert response.sources
+    assert response.sources == []
     assert response.model is None
     assert response.answer
 

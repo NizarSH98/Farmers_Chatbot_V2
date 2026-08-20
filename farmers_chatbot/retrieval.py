@@ -1,4 +1,4 @@
-"""Stable retrieval contract and legacy hybrid adapter."""
+"""Stable retrieval contract and release-backed retrieval services."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ except ModuleNotFoundError:
 
 from .documents import ProjectSearchResult, search_project_chunks
 from .graph_repository import GraphRepository, GraphRepositoryError
-from .knowledge import KnowledgeIndex, SearchResult
+from .knowledge import SearchResult
 from .provider import ProviderClient
 
 
@@ -95,11 +95,16 @@ class RetrievalService:
         raise NotImplementedError
 
 
-class LegacyHybridRetrieval(RetrievalService):
-    """RRF over all analyzer query variants using the current local indexes."""
+class ProjectOnlyFallbackRetrieval(RetrievalService):
+    """Terminal fallback: tenant project documents only, never reviewed claims.
 
-    def __init__(self, knowledge: KnowledgeIndex, *, rrf_k: int = 60) -> None:
-        self.knowledge = knowledge
+    When the release-backed graph/vector indexes are unreachable there is no
+    approved corpus to answer from, so this returns no knowledge passages and
+    warns. Answering from a superseded local corpus would let unapproved content
+    be presented and cited as reviewed guidance.
+    """
+
+    def __init__(self, *, rrf_k: int = 60) -> None:
         self.rrf_k = max(1, rrf_k)
 
     async def retrieve(
@@ -110,22 +115,6 @@ class LegacyHybridRetrieval(RetrievalService):
     ) -> EvidenceBundle:
         queries = tuple(dict.fromkeys((request.query, *request.queries)))[:4]
         top_candidates = max(request.top_k * 2, request.top_k)
-        knowledge_runs = await asyncio.gather(
-            *(
-                asyncio.to_thread(
-                    self.knowledge.search,
-                    query,
-                    language=request.language,
-                    top_k=top_candidates,
-                )
-                for query in queries
-            )
-        )
-        allowed_statuses = self._review_statuses(request)
-        knowledge_runs = [
-            [item for item in run if item.status in allowed_statuses]
-            for run in knowledge_runs
-        ]
         project_runs: list[list[ProjectSearchResult]] = []
         if project_chunks:
             project_runs = list(
@@ -141,29 +130,10 @@ class LegacyHybridRetrieval(RetrievalService):
                     )
                 )
             )
-        knowledge_results, knowledge_scores = self._fuse_knowledge(
-            knowledge_runs, request.top_k
-        )
         project_results, project_scores = self._fuse_projects(
             project_runs, min(5, request.top_k)
         )
         passages = [
-            EvidenceItem(
-                evidence_id=f"kb:{item.item_id}:{item.language}",
-                source_type="internal_knowledge",
-                title=item.title,
-                excerpt=item.text,
-                language=item.language,
-                review_status=item.status,
-                source_ids=item.source_ids,
-                geography=item.geography,
-                risk=item.risk,
-                scores={"rrf": knowledge_scores[item.item_id]},
-                metadata={"item_id": item.item_id},
-            )
-            for item in knowledge_results
-        ]
-        passages.extend(
             EvidenceItem(
                 evidence_id=f"project:{item.document_id}:{item.chunk_id}",
                 source_type="project_document",
@@ -178,52 +148,33 @@ class LegacyHybridRetrieval(RetrievalService):
                 },
             )
             for item in project_results
-        )
+        ]
         return EvidenceBundle(
             passages=passages,
-            knowledge_results=knowledge_results,
+            knowledge_results=[],
             project_results=project_results,
+            warnings=[
+                (
+                    "The reviewed knowledge release is unavailable, so no "
+                    "approved guidance could be retrieved for this question."
+                )
+            ],
             retrieval_metrics={
-                "backend": "legacy_rrf",
+                "backend": "project_only_fallback",
                 "queries": list(queries),
-                "knowledge_candidates": sum(map(len, knowledge_runs)),
+                "knowledge_candidates": 0,
                 "project_candidates": sum(map(len, project_runs)),
-                "review_statuses": list(allowed_statuses),
             },
         )
 
     @staticmethod
-    def _review_statuses(request: RetrievalRequest) -> tuple[str, ...]:
-        """Keep failover evidence eligibility aligned with PostgreSQL retrieval."""
-
-        if request.risk == "high" or request.currentness == "current":
-            return ("approved",)
-        return (
-            "approved",
-            "field_review",
-            "technical_review",
-            "draft",
-            "ai_draft",
-        )
-
-    def _fuse_knowledge(
-        self, runs: list[list[SearchResult]], limit: int
-    ) -> tuple[list[SearchResult], dict[str, float]]:
-        scores: dict[str, float] = {}
-        items: dict[str, SearchResult] = {}
-        for run in runs:
-            for rank, item in enumerate(run, start=1):
-                scores[item.item_id] = scores.get(item.item_id, 0.0) + 1.0 / (
-                    self.rrf_k + rank
-                )
-                current = items.get(item.item_id)
-                if current is None or item.score > current.score:
-                    items[item.item_id] = item
-        ordered = sorted(items.values(), key=lambda item: scores[item.item_id], reverse=True)
-        return ordered[: max(1, limit)], scores
+    def _project_key(item: ProjectSearchResult) -> str:
+        return f"{item.document_id}:{item.chunk_id}"
 
     def _fuse_projects(
-        self, runs: list[list[ProjectSearchResult]], limit: int
+        self,
+        runs: list[list[ProjectSearchResult]],
+        limit: int,
     ) -> tuple[list[ProjectSearchResult], dict[str, float]]:
         scores: dict[str, float] = {}
         items: dict[str, ProjectSearchResult] = {}
@@ -231,17 +182,9 @@ class LegacyHybridRetrieval(RetrievalService):
             for rank, item in enumerate(run, start=1):
                 key = self._project_key(item)
                 scores[key] = scores.get(key, 0.0) + 1.0 / (self.rrf_k + rank)
-                current = items.get(key)
-                if current is None or item.score > current.score:
-                    items[key] = item
-        ordered = sorted(
-            items.values(), key=lambda item: scores[self._project_key(item)], reverse=True
-        )
-        return ordered[: max(1, limit)], scores
-
-    @staticmethod
-    def _project_key(item: ProjectSearchResult) -> str:
-        return f"{item.document_id}:{item.chunk_id}"
+                items.setdefault(key, item)
+        ordered = sorted(items.values(), key=lambda i: -scores[self._project_key(i)])
+        return ordered[:limit], scores
 
 
 class PostgresGraphRetrieval(RetrievalService):
@@ -250,7 +193,7 @@ class PostgresGraphRetrieval(RetrievalService):
     def __init__(
         self,
         repository: GraphRepository,
-        legacy: LegacyHybridRetrieval,
+        legacy: ProjectOnlyFallbackRetrieval,
         provider: ProviderClient,
         *,
         deployment_scope: str = "pilot",
@@ -287,14 +230,14 @@ class PostgresGraphRetrieval(RetrievalService):
             bundle = await self.legacy.retrieve(
                 request, project_chunks=project_chunks
             )
-            bundle.warnings.append("Graph index unavailable; using local lexical index.")
+            bundle.warnings.append("Graph index unavailable; approved guidance could not be retrieved.")
             bundle.retrieval_metrics["fallback"] = "graph_unavailable"
             return bundle
         if not release_id:
             bundle = await self.legacy.retrieve(
                 request, project_chunks=project_chunks
             )
-            bundle.warnings.append("No active graph release; using local lexical index.")
+            bundle.warnings.append("No active graph release; approved guidance could not be retrieved.")
             bundle.retrieval_metrics["fallback"] = "no_active_release"
             return bundle
 

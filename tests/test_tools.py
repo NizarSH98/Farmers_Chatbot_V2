@@ -13,8 +13,25 @@ def test_search_tool_returns_structured_local_results(knowledge, store):
             {"query": "ESDU livestock work in Akkar", "language": "english", "top_k": 3},
         )
     )
+    assert result["available"] is True
     assert result["results"]
-    assert any("ESDU" in item["item_id"] or "LIVESTOCK" in item["item_id"] for item in result["results"])
+    assert all(item["status"] == "approved" for item in result["results"])
+    assert all(item["item_id"] for item in result["results"])
+
+
+def test_search_tool_refuses_when_no_release_is_active(store):
+    from conftest import FakeReleaseKnowledge
+
+    tools = ToolRegistry(FakeReleaseKnowledge(available=False), store)
+    result = json.loads(
+        tools.execute(
+            "search_knowledge",
+            {"query": "tomato pest control", "language": "english"},
+        )
+    )
+    assert result["available"] is False
+    assert result["results"] == []
+    assert "unavailable" in result["warning"]
 
 
 def test_unknown_tool_is_rejected(knowledge, store):

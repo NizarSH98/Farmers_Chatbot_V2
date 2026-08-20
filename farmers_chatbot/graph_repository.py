@@ -711,6 +711,28 @@ class GraphRepository:
             value = _row_value(row, "release_id", 0)
             return str(value) if value is not None else None
 
+    def source_record(
+        self,
+        *,
+        release_id: str,
+        source_id: str,
+    ) -> dict[str, Any] | None:
+        """Return one release-scoped source register entry, by ID or key."""
+
+        with self._connection_factory() as connection:
+            row = connection.execute(
+                """
+                SELECT id, source_key, title, publisher, source_kind,
+                       evidence_class, url, license, observed_at,
+                       effective_from, expires_at, metadata_json
+                FROM graph_sources
+                WHERE release_id = %s AND (id = %s OR source_key = %s)
+                LIMIT 1
+                """,
+                (release_id, source_id, source_id),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
     def cached_embeddings(
         self,
         *,

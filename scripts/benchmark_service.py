@@ -17,8 +17,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from farmers_chatbot.assistant_compat import UnifiedAssistantFacade
-from farmers_chatbot.knowledge import KnowledgeIndex
+from farmers_chatbot.graph_repository import GraphRepository
 from farmers_chatbot.llm import AssistantRequest
+from farmers_chatbot.pilot_store import PilotStore
+from farmers_chatbot.release_knowledge import ReleaseKnowledgeGateway
 from farmers_chatbot.storage import EvidenceStore
 from farmers_chatbot.tools import ToolRegistry
 
@@ -59,7 +61,14 @@ def main() -> int:
     if args.connected and not key:
         raise SystemExit("--connected requires OPENROUTER_API_KEY")
     with tempfile.TemporaryDirectory(prefix="raise-benchmark-") as temp_dir:
-        knowledge = KnowledgeIndex.from_directory()
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        if not database_url.startswith(("postgres://", "postgresql://")):
+            raise SystemExit(
+                "benchmark_service requires DATABASE_URL for the local release "
+                "stack; start it with scripts/raise.ps1 start"
+            )
+        store = PilotStore(database_url=database_url)
+        knowledge = ReleaseKnowledgeGateway(GraphRepository(store._connect))
         evidence = EvidenceStore(Path(temp_dir) / "runtime.sqlite3")
         tools = ToolRegistry(knowledge, evidence)
         service = UnifiedAssistantFacade(knowledge, tools, api_key=key)

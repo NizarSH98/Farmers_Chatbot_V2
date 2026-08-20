@@ -10,8 +10,8 @@ from typing import Any
 
 from .assistant_contracts import TurnCommand
 from .assistant_pipeline import AssistantEngine, PreparedTurn
-from .knowledge import KnowledgeIndex
 from .llm import AssistantRequest, AssistantResponse
+from .release_knowledge import ReleaseKnowledgeGateway
 from .tools import ToolRegistry
 
 
@@ -44,7 +44,7 @@ class UnifiedAssistantFacade:
 
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
+        knowledge: ReleaseKnowledgeGateway,
         tools: ToolRegistry,
         *,
         api_key: str | None = None,

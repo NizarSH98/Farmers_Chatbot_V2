@@ -9,8 +9,8 @@ from typing import Any
 from .artifacts import ArtifactService, convert_agricultural_units
 from .config import TRUSTED_SEARCH_MAX_CALLS
 from .documents import search_project_chunks
-from .knowledge import KnowledgeIndex
 from .language import detect_language
+from .release_knowledge import ReleaseKnowledgeGateway, ReleaseUnavailable
 from .storage import EvidenceStore, load_logframe_status
 from .trusted_sources import TrustedSourceClient
 
@@ -18,7 +18,7 @@ from .trusted_sources import TrustedSourceClient
 class ToolRegistry:
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
+        knowledge: ReleaseKnowledgeGateway,
         evidence_store: Any | None = None,
         *,
         project_chunks: list[dict[str, Any]] | None = None,
@@ -509,14 +509,27 @@ class ToolRegistry:
         language = language or detect_language(query)
         if language not in {"arabic", "english"}:
             raise ValueError("language must be arabic or english")
-        results = self.knowledge.search(
-            query,
-            language=language,
-            top_k=max(1, min(int(top_k), 10)),
-        )
+        try:
+            results = self.knowledge.search(
+                query,
+                language=language,
+                top_k=max(1, min(int(top_k), 10)),
+            )
+        except ReleaseUnavailable:
+            return {
+                "query": query,
+                "language": language,
+                "available": False,
+                "warning": (
+                    "The reviewed knowledge release is unavailable. Do not answer "
+                    "from unreviewed material; say the guidance cannot be checked."
+                ),
+                "results": [],
+            }
         return {
             "query": query,
             "language": language,
+            "available": True,
             "results": [result.to_dict() for result in results],
         }
 
@@ -559,7 +572,10 @@ class ToolRegistry:
         return self.trusted_client.search(query, category).to_dict()
 
     def get_source(self, source_id: str) -> dict[str, Any]:
-        source = self.knowledge.get_source(source_id)
+        try:
+            source = self.knowledge.get_source(source_id)
+        except ReleaseUnavailable:
+            return {"found": False, "source_id": source_id, "available": False}
         if source is None:
             return {"found": False, "source_id": source_id}
         return {"found": True, "source": source}

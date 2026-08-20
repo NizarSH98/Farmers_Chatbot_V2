@@ -50,15 +50,15 @@ from .documents import DocumentService
 from .embedding_approval import EmbeddingApprovalError, load_embedding_approval
 from .graph_repository import GraphRepository
 from .image_processing import InvalidChatImage, sanitize_chat_image
-from .knowledge import KnowledgeIndex
 from .language import detect_language
 from .legal import agreement_markdown, agreement_markdown_ar
 from .pilot_store import IdempotencyConflict, PilotStore, TurnReservation
 from .provider import ProviderClient
 from .qdrant_projection import ProjectionConfig, QdrantProjectionRepository
 from .qdrant_retrieval import QdrantGraphRetrieval
+from .release_knowledge import ReleaseKnowledgeGateway
 from .retention import purge_expired_content
-from .retrieval import LegacyHybridRetrieval, PostgresGraphRetrieval
+from .retrieval import PostgresGraphRetrieval, ProjectOnlyFallbackRetrieval
 from .storage_backends import PrivateFileStorage, configured_file_storage
 from .supabase_auth import (
     SupabaseAuthClient,
@@ -75,7 +75,7 @@ from .whatsapp_router import router as whatsapp_router
 class WebServices:
     store: PilotStore
     storage: PrivateFileStorage
-    knowledge: KnowledgeIndex
+    knowledge: ReleaseKnowledgeGateway
     trusted: TrustedSourceClient
     auth: SupabaseAuthClient
     pipeline: AssistantEngine
@@ -167,12 +167,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         sqlite_path=os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"),
     )
     storage = configured_file_storage()
-    allowed_statuses = (
-        {"approved"}
-        if APP_ENV == "production"
-        else {"draft", "ai_draft", "technical_review", "field_review", "approved"}
+    # Only project-owner-approved release content is eligible outside internal
+    # scopes. Draft states stay reachable to editors through the admin APIs.
+    review_statuses = (
+        ("approved",)
+        if APP_ENV in {"pilot", "production"}
+        else ("approved", "field_review", "technical_review")
     )
-    knowledge = KnowledgeIndex.from_directory(allowed_statuses=allowed_statuses)
+    knowledge = ReleaseKnowledgeGateway(
+        GraphRepository(store._connect),
+        deployment_scope="production" if APP_ENV == "production" else "pilot",
+        review_statuses=review_statuses,
+    )
     trusted = TrustedSourceClient(
         settings.openrouter_api_key,
         enabled=os.getenv("ENABLE_TRUSTED_WEB_SEARCH", "false").lower() == "true",
@@ -228,7 +234,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             approval_sha256 = approval.report_sha256
         retrieval = PostgresGraphRetrieval(
             GraphRepository(store._connect),
-            LegacyHybridRetrieval(knowledge),
+            ProjectOnlyFallbackRetrieval(),
             provider,
             deployment_scope="production" if APP_ENV == "production" else "pilot",
             embedding_model=embedding_model,

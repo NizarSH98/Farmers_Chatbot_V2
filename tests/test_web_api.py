@@ -37,8 +37,9 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
         app = web_mod.app
 
         # Manually set up services (lifespan is not triggered by ASGITransport)
+        from conftest import FakeReleaseKnowledge
+
         from farmers_chatbot.assistant_pipeline import AsyncAssistantPipeline
-        from farmers_chatbot.knowledge import KnowledgeIndex
         from farmers_chatbot.pilot_store import PilotStore
         from farmers_chatbot.storage_backends import LocalPrivateStorage
         from farmers_chatbot.supabase_auth import SupabaseAuthClient
@@ -46,7 +47,7 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
 
         store = PilotStore(sqlite_path=db_path)
         storage = LocalPrivateStorage(root=os.path.join(td, "files"))
-        knowledge = KnowledgeIndex.from_directory()
+        knowledge = FakeReleaseKnowledge()
         trusted = TrustedSourceClient(None, enabled=False)
         auth = SupabaseAuthClient()
         test_http_client = httpx.AsyncClient()

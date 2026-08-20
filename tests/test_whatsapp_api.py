@@ -5,13 +5,13 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from conftest import FakeReleaseKnowledge
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import farmers_chatbot.whatsapp_router as whatsapp_api
 import whatsapp_api as compatibility_wrapper
 from farmers_chatbot.assistant_contracts import TurnResult
-from farmers_chatbot.knowledge import KnowledgeIndex
 from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.storage_backends import LocalPrivateStorage
 from farmers_chatbot.trusted_sources import TrustedSourceClient
@@ -26,7 +26,7 @@ def _signed_body(payload: dict, secret: str) -> tuple[bytes, str]:
 
 def _services(tmp_path, pilot_store):
     return SimpleNamespace(
-        knowledge=KnowledgeIndex.from_directory(),
+        knowledge=FakeReleaseKnowledge(),
         store=pilot_store,
         storage=LocalPrivateStorage(tmp_path / "private"),
         trusted=TrustedSourceClient(api_key=None, enabled=False),

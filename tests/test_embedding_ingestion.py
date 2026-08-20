@@ -90,7 +90,7 @@ class _Provider:
 @pytest.mark.asyncio
 async def test_release_embeddings_are_batched_cached_and_reusable() -> None:
     source = build_release_batch(
-        "knowledge_base/agrifood_knowledge_draft_v0.2.md",
+        "knowledge_base/agrifood_knowledge_v0.3.en.md",
         embedding_model="approved/model",
         embedding_dimensions=768,
     )

@@ -10,7 +10,8 @@ from .config import (
     ModeProfile,
 )
 from .documents import ProjectSearchResult
-from .knowledge import KnowledgeIndex, SearchResult
+from .knowledge import SearchResult
+from .release_knowledge import ReleaseKnowledgeGateway, ReleaseUnavailable
 from .tools import ToolRegistry
 
 SYSTEM_PROMPT_VERSION = "raise-pilot-2026-08-v1"
@@ -86,7 +87,7 @@ AssistantResult = AssistantResponse
 class AssistantPromptBuilder:
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
+        knowledge: ReleaseKnowledgeGateway,
         tools: ToolRegistry,
         api_key: str | None = None,
         timeout_seconds: float = 40,
@@ -286,7 +287,10 @@ class AssistantPromptBuilder:
         for result in sources:
             urls = []
             for source_id in result.source_ids:
-                source = self.knowledge.get_source(source_id)
+                try:
+                    source = self.knowledge.get_source(source_id)
+                except ReleaseUnavailable:
+                    source = None
                 if source:
                     urls.append(
                         {
@@ -406,7 +410,7 @@ class AssistantService:
 
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
+        knowledge: ReleaseKnowledgeGateway,
         tools: ToolRegistry,
         api_key: str | None = None,
         timeout_seconds: float = 40,

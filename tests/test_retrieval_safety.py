@@ -4,32 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from farmers_chatbot.knowledge import KnowledgeDocument, KnowledgeIndex
 from farmers_chatbot.retrieval import (
-    LegacyHybridRetrieval,
     PostgresGraphRetrieval,
+    ProjectOnlyFallbackRetrieval,
     RetrievalRequest,
 )
-
-
-def _index() -> KnowledgeIndex:
-    common = {
-        "title": "Tomato pest control",
-        "text": "Inspect tomato plants before selecting pest controls.",
-        "language": "english",
-        "geography": ("Lebanon",),
-        "topics": ("tomato", "pest"),
-        "source_ids": ("source",),
-        "evidence_class": "guidance",
-        "risk": "high",
-    }
-    return KnowledgeIndex(
-        [
-            KnowledgeDocument(item_id="draft", status="ai_draft", **common),
-            KnowledgeDocument(item_id="approved", status="approved", **common),
-        ],
-        {},
-    )
 
 
 def _request(*, risk: str = "medium", currentness: str = "stable") -> RetrievalRequest:
@@ -44,41 +23,42 @@ def _request(*, risk: str = "medium", currentness: str = "stable") -> RetrievalR
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("risk", "currentness"),
-    [("high", "stable"), ("medium", "current")],
-)
-async def test_legacy_failover_excludes_unapproved_evidence(
-    risk: str, currentness: str
-) -> None:
-    result = await LegacyHybridRetrieval(_index()).retrieve(
-        _request(risk=risk, currentness=currentness)
-    )
+async def test_terminal_fallback_serves_no_reviewed_knowledge() -> None:
+    """The fallback must never substitute a superseded local corpus."""
 
-    assert [item.item_id for item in result.knowledge_results] == ["approved"]
-    assert {item.review_status for item in result.passages} == {"approved"}
-    assert result.retrieval_metrics["review_statuses"] == ["approved"]
+    result = await ProjectOnlyFallbackRetrieval().retrieve(_request())
+
+    assert result.knowledge_results == []
+    assert result.passages == []
+    assert result.retrieval_metrics["backend"] == "project_only_fallback"
+    assert result.retrieval_metrics["knowledge_candidates"] == 0
+    assert result.warnings and "unavailable" in result.warnings[0]
 
 
 @pytest.mark.asyncio
-async def test_legacy_pilot_still_exposes_labeled_drafts_for_stable_guidance() -> None:
-    result = await LegacyHybridRetrieval(_index()).retrieve(_request())
+async def test_terminal_fallback_still_serves_tenant_project_documents() -> None:
+    chunks = [
+        {
+            "id": "chunk-1",
+            "document_id": "doc-1",
+            "filename": "soil-report.pdf",
+            "text_content": "Tomato pest control notes for the Akkar plot.",
+        }
+    ]
+    result = await ProjectOnlyFallbackRetrieval().retrieve(
+        _request(), project_chunks=chunks
+    )
 
-    assert {item.item_id for item in result.knowledge_results} == {
-        "approved",
-        "draft",
-    }
-    assert {item.review_status for item in result.passages} == {
-        "approved",
-        "ai_draft",
-    }
+    assert [item.source_type for item in result.passages] == ["project_document"]
+    assert {item.review_status for item in result.passages} == {"user_provided"}
+    assert result.knowledge_results == []
 
 
 @pytest.mark.parametrize(
     ("risk", "currentness"),
     [("high", "stable"), ("medium", "current")],
 )
-def test_postgres_review_filter_matches_failover(
+def test_postgres_review_filter_restricts_to_approved(
     risk: str, currentness: str
 ) -> None:
     retrieval = object.__new__(PostgresGraphRetrieval)
