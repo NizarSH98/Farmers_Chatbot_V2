@@ -18,7 +18,10 @@ from dataclasses import dataclass, field
 # not match a known ID, so a stray internal identifier never reaches a farmer.
 _EVIDENCE_SHAPED = re.compile(
     r"\[(?:qdrant|graph|kb|project|live|chunk|claim|relation|evidence)"
-    r":[^\]\n]{1,160}\]",
+    r":[^\]\n]{1,160}\]"
+    # Corpus/release source codes such as [RAISE-AGRIFOOD-APPROVED-V0.3]; the
+    # source card list already attributes them, so the code itself is noise.
+    r"|\s?\[RAISE-[A-Z0-9][A-Z0-9._-]{1,120}\]",
     re.IGNORECASE,
 )
 # Longest plausible tag, used to decide how much of a stream tail to hold back.

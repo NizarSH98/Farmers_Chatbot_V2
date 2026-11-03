@@ -24,6 +24,21 @@ from pydantic import (
 
 CLARIFICATION_SCHEMA_VERSION = "raise-clarification-v2"
 DEFAULT_MAX_CLARIFICATION_ROUNDS = 3
+
+
+def max_clarification_rounds(clarification_style: str) -> int:
+    """Rounds of clarification allowed before answering with stated assumptions.
+
+    The default style asks at most once: a farmer who has answered one set of
+    questions expects an answer, not another questionnaire. Guided mode exists
+    to narrow a need step by step, so it keeps the full allowance.
+    """
+
+    if clarification_style == "guided":
+        return DEFAULT_MAX_CLARIFICATION_ROUNDS
+    if clarification_style == "direct":
+        return 0
+    return 1
 _ARABIC = re.compile(r"[\u0600-\u06ff]")
 _LATIN = re.compile(r"[A-Za-z]")
 
@@ -240,7 +255,9 @@ class ClarificationWorkflow:
             analysis = plan.model_dump(mode="json")
             round_number = int(state.get("round") or 0)
             max_rounds = int(
-                state.get("max_rounds") or DEFAULT_MAX_CLARIFICATION_ROUNDS
+                DEFAULT_MAX_CLARIFICATION_ROUNDS
+                if state.get("max_rounds") is None
+                else state["max_rounds"]
             )
             pending = bool(plan.needs_clarification and round_number < max_rounds)
             if plan.needs_clarification and not pending:
@@ -249,9 +266,9 @@ class ClarificationWorkflow:
                 analysis["clarification_options"] = []
                 assumptions = list(analysis.get("assumptions") or [])
                 assumptions.append(
-                    "تابعتُ بعد بلوغ الحد الأقصى من أسئلة الاستيضاح."
+                    "أجبتُ بناءً على التفاصيل المتوفرة."
                     if state.get("language") == "arabic"
-                    else "Proceeded after reaching the clarification-round limit."
+                    else "Answered with the details provided."
                 )
                 analysis["assumptions"] = _clean_unique(assumptions, limit=8)
             return {
@@ -310,7 +327,9 @@ class ClarificationWorkflow:
                 "status": "pending",
                 "round": round_number,
                 "max_rounds": int(
-                    state.get("max_rounds") or DEFAULT_MAX_CLARIFICATION_ROUNDS
+                    DEFAULT_MAX_CLARIFICATION_ROUNDS
+                    if state.get("max_rounds") is None
+                    else state["max_rounds"]
                 ),
                 "questions": interaction_questions,
                 "question": interaction_questions[0]["prompt"],
@@ -404,7 +423,7 @@ class ClarificationWorkflow:
                         "history": history[-6:],
                         "answers": [],
                         "round": 0,
-                        "max_rounds": DEFAULT_MAX_CLARIFICATION_ROUNDS,
+                        "max_rounds": max_clarification_rounds(clarification_style),
                         "effective_text": text,
                         "analysis": {},
                         "pending": False,
