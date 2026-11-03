@@ -1,10 +1,11 @@
+from conftest import new_pilot_store
+
 from farmers_chatbot.auth import UserIdentity
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.retention import purge_expired_content
 
 
 def test_retention_deletes_content_and_anonymizes_metrics(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user = store.upsert_user(
         UserIdentity(
             user_id="",
@@ -31,15 +32,15 @@ def test_retention_deletes_content_and_anonymizes_metrics(tmp_path):
     old = "2020-01-01T00:00:00+00:00"
     with store._connect() as connection:
         connection.execute(
-            "UPDATE messages SET created_at = ? WHERE conversation_id = ?",
+            "UPDATE messages SET created_at = %s WHERE conversation_id = %s",
             (old, conversation_id),
         )
         connection.execute(
-            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            "UPDATE conversations SET updated_at = %s WHERE id = %s",
             (old, conversation_id),
         )
         connection.execute(
-            "UPDATE query_events SET occurred_at = ?, day_utc = ?",
+            "UPDATE query_events SET occurred_at = %s, day_utc = %s",
             (old, "2020-01-01"),
         )
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import io
+import math
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from docx import Document
@@ -65,6 +66,54 @@ def _limited_items(items: list[Any], maximum: int = 50) -> list[Any]:
     return items[:maximum]
 
 
+def _evidence_ids(values: list[str] | None, maximum: int = 50) -> list[str]:
+    result: list[str] = []
+    for raw_value in (values or [])[:maximum]:
+        value = str(raw_value).strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value):
+            raise ValueError(f"Invalid evidence ID: {value[:40]}")
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _nonnegative_number(value: Any, label: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a number") from exc
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"{label} must be finite and non-negative")
+    return number
+
+
+def _optional_iso_date(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip()
+    try:
+        return date.fromisoformat(normalized).isoformat()
+    except ValueError as exc:
+        raise ValueError("as_of_date must use YYYY-MM-DD") from exc
+
+
+def _provenance_metadata(
+    evidence_ids: list[str],
+    legacy_sources: list[str],
+) -> dict[str, Any]:
+    if evidence_ids:
+        status = "evidence_linked"
+    elif legacy_sources:
+        status = "legacy_unstructured"
+    else:
+        status = "unlinked"
+    return {
+        "evidence_ids": evidence_ids,
+        "legacy_sources": legacy_sources[:30],
+        "provenance_status": status,
+    }
+
+
 def _set_paragraph_direction(paragraph: Any, arabic: bool) -> None:
     if not arabic:
         return
@@ -81,6 +130,7 @@ def _docx_bytes(
     sections: list[tuple[str, str | list[str]]],
     language: str,
     sources: list[str],
+    evidence_ids: list[str],
     assumptions: list[str],
 ) -> bytes:
     arabic = language == "arabic"
@@ -122,6 +172,13 @@ def _docx_bytes(
                 _limited_text(str(item)),
                 style="List Bullet",
             )
+            _set_paragraph_direction(item_paragraph, arabic)
+
+    if evidence_ids:
+        evidence_heading = document.add_heading("Evidence IDs", 1)
+        _set_paragraph_direction(evidence_heading, arabic)
+        for item in evidence_ids[:50]:
+            item_paragraph = document.add_paragraph(item, style="List Bullet")
             _set_paragraph_direction(item_paragraph, arabic)
 
     warning = document.add_paragraph(
@@ -188,8 +245,11 @@ class ArtifactService:
         actions: list[str],
         assumptions: list[str] | None = None,
         sources: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
         language: str = "english",
     ) -> dict[str, Any]:
+        linked_evidence = _evidence_ids(evidence_ids)
+        legacy_sources = sources or []
         data = _docx_bytes(
             title=title,
             sections=[
@@ -197,7 +257,8 @@ class ArtifactService:
                 ("Action plan / خطة العمل", actions),
             ],
             language=language,
-            sources=sources or [],
+            sources=legacy_sources,
+            evidence_ids=linked_evidence,
             assumptions=assumptions or [],
         )
         filename = _safe_filename(title, ".docx")
@@ -206,7 +267,11 @@ class ArtifactService:
             filename,
             DOCX_MIME,
             data,
-            {"language": language, "item_count": len(actions)},
+            {
+                "language": language,
+                "item_count": len(actions),
+                **_provenance_metadata(linked_evidence, legacy_sources),
+            },
         ).to_dict()
 
     def generate_inspection_checklist(
@@ -217,8 +282,11 @@ class ArtifactService:
         checks: list[str],
         escalation_signs: list[str] | None = None,
         sources: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
         language: str = "english",
     ) -> dict[str, Any]:
+        linked_evidence = _evidence_ids(evidence_ids)
+        legacy_sources = sources or []
         sections: list[tuple[str, str | list[str]]] = [
             ("Context / السياق", context),
             ("Inspection checks / نقاط الفحص", [f"☐ {item}" for item in checks]),
@@ -229,7 +297,8 @@ class ArtifactService:
             title=title,
             sections=sections,
             language=language,
-            sources=sources or [],
+            sources=legacy_sources,
+            evidence_ids=linked_evidence,
             assumptions=[],
         )
         filename = _safe_filename(title, ".docx")
@@ -238,7 +307,11 @@ class ArtifactService:
             filename,
             DOCX_MIME,
             data,
-            {"language": language, "item_count": len(checks)},
+            {
+                "language": language,
+                "item_count": len(checks),
+                **_provenance_metadata(linked_evidence, legacy_sources),
+            },
         ).to_dict()
 
     def generate_expert_referral_brief(
@@ -250,8 +323,11 @@ class ArtifactService:
         question_for_expert: str,
         urgent_signs: list[str] | None = None,
         sources: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
         language: str = "english",
     ) -> dict[str, Any]:
+        linked_evidence = _evidence_ids(evidence_ids)
+        legacy_sources = sources or []
         sections: list[tuple[str, str | list[str]]] = [
             ("Situation / الحالة", situation),
             ("Observed information / المعلومات المرصودة", observations),
@@ -263,7 +339,8 @@ class ArtifactService:
             title=title,
             sections=sections,
             language=language,
-            sources=sources or [],
+            sources=legacy_sources,
+            evidence_ids=linked_evidence,
             assumptions=[],
         )
         filename = _safe_filename(title, ".docx")
@@ -272,7 +349,10 @@ class ArtifactService:
             filename,
             DOCX_MIME,
             data,
-            {"language": language},
+            {
+                "language": language,
+                **_provenance_metadata(linked_evidence, legacy_sources),
+            },
         ).to_dict()
 
     def generate_crop_calendar(
@@ -282,8 +362,11 @@ class ArtifactService:
         entries: list[dict[str, Any]],
         assumptions: list[str] | None = None,
         sources: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
         language: str = "english",
     ) -> dict[str, Any]:
+        linked_evidence = _evidence_ids(evidence_ids)
+        legacy_sources = sources or []
         rows = _limited_items(entries, 60)
         workbook = Workbook()
         sheet = workbook.active
@@ -313,8 +396,11 @@ class ArtifactService:
         for item in (assumptions or [])[:20]:
             meta.append([_safe_cell(item)])
         meta.append(["Sources"])
-        for item in (sources or [])[:20]:
+        for item in legacy_sources[:20]:
             meta.append([_safe_cell(item)])
+        meta.append(["Evidence IDs"])
+        for item in linked_evidence:
+            meta.append([item])
         buffer = io.BytesIO()
         workbook.save(buffer)
         filename = _safe_filename(title, ".xlsx")
@@ -323,7 +409,11 @@ class ArtifactService:
             filename,
             XLSX_MIME,
             buffer.getvalue(),
-            {"language": language, "entry_count": len(rows)},
+            {
+                "language": language,
+                "entry_count": len(rows),
+                **_provenance_metadata(linked_evidence, legacy_sources),
+            },
         ).to_dict()
 
     def calculate_enterprise_budget(
@@ -335,52 +425,329 @@ class ArtifactService:
         revenues: list[dict[str, Any]],
         assumptions: list[str] | None = None,
         sources: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
+        geography: str | None = None,
+        as_of_date: str | None = None,
+        financing_cost: float = 0,
+        depreciation_cost: float = 0,
+        sensitivity_scenarios: list[dict[str, Any]] | None = None,
+        impacts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        cost_rows = _limited_items(costs, 100)
-        revenue_rows = _limited_items(revenues, 50)
+        currency_value = _limited_text(currency, 20)
+        geography_value = (
+            _limited_text(geography, 200) if geography and geography.strip() else None
+        )
+        effective_date = _optional_iso_date(as_of_date)
+        linked_evidence = _evidence_ids(evidence_ids)
+        legacy_sources = sources or []
+        assumption_rows = [
+            _limited_text(str(item), 1000) for item in (assumptions or [])[:30]
+        ]
+        valid_statuses = {"user_provided", "sourced", "assumption", "estimated"}
+
+        def link_evidence_id(raw_value: Any) -> str:
+            value = str(raw_value or "").strip()
+            if not value:
+                return ""
+            value = _evidence_ids([value], 1)[0]
+            if value not in linked_evidence:
+                if len(linked_evidence) >= 50:
+                    raise ValueError("Artifact accepts at most 50 evidence IDs")
+                linked_evidence.append(value)
+            return value
+
+        def normalize_line(
+            row: dict[str, Any],
+            *,
+            index: int,
+            revenue: bool,
+        ) -> dict[str, Any]:
+            kind = "Revenue" if revenue else "Cost"
+            item = _limited_text(str(row.get("item") or ""), 200)
+            quantity = _nonnegative_number(row.get("quantity"), f"{kind} {index} quantity")
+            price_key = "unit_price" if revenue else "unit_cost"
+            unit_price = _nonnegative_number(
+                row.get(price_key), f"{kind} {index} {price_key}"
+            )
+            unit = _limited_text(str(row.get("unit") or ""), 80)
+            period = str(row.get("period") or "Unscheduled").strip()[:80]
+            status = str(row.get("value_status") or "user_provided").lower()
+            if status not in valid_statuses:
+                raise ValueError(
+                    f"{kind} {index} value_status must be user_provided, "
+                    "sourced, assumption, or estimated"
+                )
+            row_evidence = link_evidence_id(row.get("evidence_id"))
+            if status == "sourced" and not row_evidence:
+                raise ValueError(f"{kind} {index} requires evidence_id when sourced")
+            return {
+                "item": item,
+                "quantity": quantity,
+                "unit": unit,
+                "unit_price": unit_price,
+                "category": str(
+                    row.get("category") or ("revenue" if revenue else "operating")
+                )[:80],
+                "period": period,
+                "value_status": status,
+                "evidence_id": row_evidence,
+                "total": quantity * unit_price,
+            }
+
+        cost_rows = [
+            normalize_line(row, index=index, revenue=False)
+            for index, row in enumerate(_limited_items(costs, 100), start=1)
+        ]
+        revenue_rows = [
+            normalize_line(row, index=index, revenue=True)
+            for index, row in enumerate(_limited_items(revenues, 50), start=1)
+        ]
+        financing_value = _nonnegative_number(financing_cost, "financing_cost")
+        depreciation_value = _nonnegative_number(
+            depreciation_cost, "depreciation_cost"
+        )
+        for item, category, value in (
+            ("Financing cost", "financing", financing_value),
+            ("Depreciation", "depreciation", depreciation_value),
+        ):
+            if value:
+                cost_rows.append(
+                    {
+                        "item": item,
+                        "quantity": 1.0,
+                        "unit": "lump sum",
+                        "unit_price": value,
+                        "category": category,
+                        "period": "Unscheduled",
+                        "value_status": "assumption",
+                        "evidence_id": "",
+                        "total": value,
+                    }
+                )
+
+        total_cost = sum(row["total"] for row in cost_rows)
+        total_revenue = sum(row["total"] for row in revenue_rows)
+        net_margin = total_revenue - total_cost
+        net_before_financing_tax = (
+            total_revenue - total_cost + financing_value + depreciation_value
+        )
+        margin_percent = (net_margin / total_revenue * 100) if total_revenue else None
+
+        break_even: list[dict[str, Any]] = []
+        for row in revenue_rows:
+            other_revenue = total_revenue - row["total"]
+            required_revenue = max(total_cost - other_revenue, 0.0)
+            break_even.append(
+                {
+                    "item": row["item"],
+                    "unit": row["unit"],
+                    "break_even_unit_price": (
+                        required_revenue / row["quantity"]
+                        if row["quantity"] > 0
+                        else None
+                    ),
+                    "break_even_quantity": (
+                        required_revenue / row["unit_price"]
+                        if row["unit_price"] > 0
+                        else None
+                    ),
+                    "required_revenue_after_other_products": required_revenue,
+                }
+            )
+
+        cash_flow_by_period: dict[str, dict[str, float]] = {}
+        for row in cost_rows:
+            if row["category"] == "depreciation":
+                continue
+            period = row["period"]
+            cash_flow_by_period.setdefault(period, {"cash_in": 0.0, "cash_out": 0.0})
+            cash_flow_by_period[period]["cash_out"] += row["total"]
+        for row in revenue_rows:
+            period = row["period"]
+            cash_flow_by_period.setdefault(period, {"cash_in": 0.0, "cash_out": 0.0})
+            cash_flow_by_period[period]["cash_in"] += row["total"]
+        ordered_periods = sorted(
+            cash_flow_by_period,
+            key=lambda value: (value == "Unscheduled", value.lower()),
+        )
+        cash_flow: list[dict[str, Any]] = []
+        cumulative = 0.0
+        for period in ordered_periods:
+            values = cash_flow_by_period[period]
+            net = values["cash_in"] - values["cash_out"]
+            cumulative += net
+            cash_flow.append(
+                {
+                    "period": period,
+                    "cash_in": values["cash_in"],
+                    "cash_out": values["cash_out"],
+                    "net_cash_flow": net,
+                    "cumulative_cash_flow": cumulative,
+                }
+            )
+
+        default_scenarios = [
+            {
+                "name": "Downside",
+                "quantity_change_percent": -10,
+                "price_change_percent": -10,
+                "cost_change_percent": 10,
+            },
+            {
+                "name": "Base",
+                "quantity_change_percent": 0,
+                "price_change_percent": 0,
+                "cost_change_percent": 0,
+            },
+            {
+                "name": "Upside",
+                "quantity_change_percent": 10,
+                "price_change_percent": 10,
+                "cost_change_percent": -5,
+            },
+        ]
+        scenario_inputs = (sensitivity_scenarios or default_scenarios)[:10]
+        sensitivity: list[dict[str, Any]] = []
+        for index, scenario in enumerate(scenario_inputs, start=1):
+            name = _limited_text(str(scenario.get("name") or f"Scenario {index}"), 80)
+            changes: dict[str, float] = {}
+            for field in (
+                "quantity_change_percent",
+                "price_change_percent",
+                "cost_change_percent",
+            ):
+                try:
+                    change = float(scenario.get(field) or 0)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{name} {field} must be a number") from exc
+                if not math.isfinite(change) or change < -100 or change > 1000:
+                    raise ValueError(f"{name} {field} must be between -100 and 1000")
+                changes[field] = change
+            scenario_revenue = (
+                total_revenue
+                * (1 + changes["quantity_change_percent"] / 100)
+                * (1 + changes["price_change_percent"] / 100)
+            )
+            scenario_cost = total_cost * (1 + changes["cost_change_percent"] / 100)
+            sensitivity.append(
+                {
+                    "name": name,
+                    **changes,
+                    "total_revenue": scenario_revenue,
+                    "total_cost": scenario_cost,
+                    "net_margin": scenario_revenue - scenario_cost,
+                }
+            )
+        downside_margin = min(item["net_margin"] for item in sensitivity)
+
+        valid_impact_categories = {
+            "water",
+            "fertilizer",
+            "pesticide",
+            "energy",
+            "labor",
+        }
+        normalized_impacts: list[dict[str, Any]] = []
+        for index, impact in enumerate((impacts or [])[:50], start=1):
+            category = str(impact.get("category") or "").lower()
+            if category not in valid_impact_categories:
+                raise ValueError(f"Impact {index} has an unsupported category")
+            status = str(impact.get("value_status") or "estimated").lower()
+            if status not in valid_statuses:
+                raise ValueError(f"Impact {index} has an invalid value_status")
+            impact_evidence = link_evidence_id(impact.get("evidence_id"))
+            if status == "sourced" and not impact_evidence:
+                raise ValueError(f"Impact {index} requires evidence_id when sourced")
+            normalized_impacts.append(
+                {
+                    "category": category,
+                    "quantity": _nonnegative_number(
+                        impact.get("quantity"), f"Impact {index} quantity"
+                    ),
+                    "unit": _limited_text(str(impact.get("unit") or ""), 80),
+                    "period": str(impact.get("period") or "Unscheduled")[:80],
+                    "value_status": status,
+                    "evidence_id": impact_evidence,
+                }
+            )
+
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Enterprise budget"
-        sheet.append([title])
-        sheet.append(["Currency", _safe_cell(currency)])
+        sheet.append([_safe_cell(_limited_text(title, 200))])
+        sheet.append(["Currency", _safe_cell(currency_value)])
+        sheet.append(["Geography", _safe_cell(geography_value or "Not supplied")])
+        sheet.append(["As of date", effective_date or "Not supplied"])
         sheet.append([])
         sheet.append(["Costs"])
-        sheet.append(["Item", "Quantity", "Unit", "Unit cost", "Total cost"])
-        cost_start = 6
+        sheet.append(
+            [
+                "Item",
+                "Quantity",
+                "Unit",
+                "Unit cost",
+                "Category",
+                "Period",
+                "Value status",
+                "Evidence ID",
+                "Total cost",
+            ]
+        )
+        cost_start = sheet.max_row + 1
         for row in cost_rows:
             sheet.append(
                 [
-                    _safe_cell(str(row.get("item") or "")),
-                    float(row.get("quantity") or 0),
-                    _safe_cell(str(row.get("unit") or "")),
-                    float(row.get("unit_cost") or 0),
+                    _safe_cell(row["item"]),
+                    row["quantity"],
+                    _safe_cell(row["unit"]),
+                    row["unit_price"],
+                    _safe_cell(row["category"]),
+                    _safe_cell(row["period"]),
+                    row["value_status"],
+                    row["evidence_id"],
                     None,
                 ]
             )
             current = sheet.max_row
-            sheet.cell(current, 5, f"=B{current}*D{current}")
+            sheet.cell(current, 9, f"=B{current}*D{current}")
         cost_end = sheet.max_row
         sheet.append(
-            ["Total costs", None, None, None, f"=SUM(E{cost_start}:E{cost_end})"]
+            ["Total costs", None, None, None, None, None, None, None, f"=SUM(I{cost_start}:I{cost_end})"]
         )
         total_cost_row = sheet.max_row
 
         sheet.append([])
         sheet.append(["Revenue scenarios"])
-        sheet.append(["Item", "Quantity", "Unit", "Unit price", "Total revenue"])
+        sheet.append(
+            [
+                "Item",
+                "Quantity",
+                "Unit",
+                "Unit price",
+                "Category",
+                "Period",
+                "Value status",
+                "Evidence ID",
+                "Total revenue",
+            ]
+        )
         revenue_start = sheet.max_row + 1
         for row in revenue_rows:
             sheet.append(
                 [
-                    _safe_cell(str(row.get("item") or "")),
-                    float(row.get("quantity") or 0),
-                    _safe_cell(str(row.get("unit") or "")),
-                    float(row.get("unit_price") or 0),
+                    _safe_cell(row["item"]),
+                    row["quantity"],
+                    _safe_cell(row["unit"]),
+                    row["unit_price"],
+                    _safe_cell(row["category"]),
+                    _safe_cell(row["period"]),
+                    row["value_status"],
+                    row["evidence_id"],
                     None,
                 ]
             )
             current = sheet.max_row
-            sheet.cell(current, 5, f"=B{current}*D{current}")
+            sheet.cell(current, 9, f"=B{current}*D{current}")
         revenue_end = sheet.max_row
         sheet.append(
             [
@@ -388,64 +755,192 @@ class ArtifactService:
                 None,
                 None,
                 None,
-                f"=SUM(E{revenue_start}:E{revenue_end})",
+                None,
+                None,
+                None,
+                None,
+                f"=SUM(I{revenue_start}:I{revenue_end})",
             ]
         )
         total_revenue_row = sheet.max_row
         sheet.append(
             [
-                "Net before financing/tax",
+                "Net before financing/depreciation/tax",
                 None,
                 None,
                 None,
-                f"=E{total_revenue_row}-E{total_cost_row}",
+                None,
+                None,
+                None,
+                None,
+                net_before_financing_tax,
             ]
         )
-        for column in "ABCDE":
-            sheet.column_dimensions[column].width = 24
-        for row_number in (1, 4, 5, total_cost_row, total_revenue_row):
+        sheet.append(
+            [
+                "Net after financing/depreciation, before tax",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                f"=I{total_revenue_row}-I{total_cost_row}",
+            ]
+        )
+        for column in "ABCDEFGHI":
+            sheet.column_dimensions[column].width = 20
+        for row_number in (1, 6, 7, total_cost_row, total_revenue_row):
             for cell in sheet[row_number]:
                 cell.font = Font(bold=True)
-        meta = workbook.create_sheet("Assumptions and sources")
+
+        break_even_sheet = workbook.create_sheet("Break-even")
+        break_even_sheet.append(
+            [
+                "Revenue item",
+                "Unit",
+                "Break-even unit price",
+                "Break-even quantity",
+                "Revenue still required",
+            ]
+        )
+        for row in break_even:
+            break_even_sheet.append(
+                [
+                    _safe_cell(row["item"]),
+                    _safe_cell(row["unit"]),
+                    row["break_even_unit_price"],
+                    row["break_even_quantity"],
+                    row["required_revenue_after_other_products"],
+                ]
+            )
+
+        cash_sheet = workbook.create_sheet("Cash flow")
+        cash_sheet.append(
+            ["Period", "Cash in", "Cash out", "Net cash flow", "Cumulative cash flow"]
+        )
+        for row in cash_flow:
+            cash_sheet.append(
+                [
+                    _safe_cell(row["period"]),
+                    row["cash_in"],
+                    row["cash_out"],
+                    row["net_cash_flow"],
+                    row["cumulative_cash_flow"],
+                ]
+            )
+
+        sensitivity_sheet = workbook.create_sheet("Sensitivity")
+        sensitivity_sheet.append(
+            [
+                "Scenario",
+                "Quantity change %",
+                "Price change %",
+                "Cost change %",
+                "Revenue",
+                "Cost",
+                "Net margin",
+            ]
+        )
+        for row in sensitivity:
+            sensitivity_sheet.append(
+                [
+                    _safe_cell(row["name"]),
+                    row["quantity_change_percent"],
+                    row["price_change_percent"],
+                    row["cost_change_percent"],
+                    row["total_revenue"],
+                    row["total_cost"],
+                    row["net_margin"],
+                ]
+            )
+
+        impact_sheet = workbook.create_sheet("Sustainability impacts")
+        impact_sheet.append(
+            ["Category", "Quantity", "Unit", "Period", "Value status", "Evidence ID"]
+        )
+        for row in normalized_impacts:
+            impact_sheet.append(
+                [
+                    row["category"],
+                    row["quantity"],
+                    _safe_cell(row["unit"]),
+                    _safe_cell(row["period"]),
+                    row["value_status"],
+                    row["evidence_id"],
+                ]
+            )
+
+        meta = workbook.create_sheet("Assumptions and evidence")
         meta.append(["Generated", datetime.now(UTC).isoformat()])
-        meta.append(["Currency", _safe_cell(currency)])
+        meta.append(["Currency", _safe_cell(currency_value)])
+        meta.append(["Geography", _safe_cell(geography_value or "Not supplied")])
+        meta.append(["As of date", effective_date or "Not supplied"])
         meta.append(["Assumptions"])
-        for item in (assumptions or [])[:30]:
+        for item in assumption_rows:
             meta.append([_safe_cell(item)])
-        meta.append(["Sources"])
-        for item in (sources or [])[:30]:
+        meta.append(["Evidence IDs"])
+        for item in linked_evidence:
+            meta.append([item])
+        meta.append(["Legacy sources"])
+        for item in legacy_sources[:30]:
             meta.append([_safe_cell(item)])
 
-        total_cost = sum(
-            float(row.get("quantity") or 0) * float(row.get("unit_cost") or 0)
-            for row in cost_rows
-        )
-        total_revenue = sum(
-            float(row.get("quantity") or 0) * float(row.get("unit_price") or 0)
-            for row in revenue_rows
-        )
         buffer = io.BytesIO()
         workbook.save(buffer)
         filename = _safe_filename(title, ".xlsx")
+        statuses = [row["value_status"] for row in [*cost_rows, *revenue_rows]]
+        status_counts = {status: statuses.count(status) for status in sorted(set(statuses))}
+        provenance = _provenance_metadata(linked_evidence, legacy_sources)
+        warnings = ["Scenario estimate; not a profit guarantee."]
+        if not geography_value:
+            warnings.append("Geography was not supplied.")
+        if not effective_date:
+            warnings.append("As-of date was not supplied.")
+        if provenance["provenance_status"] != "evidence_linked":
+            warnings.append("Material values are not linked to immutable evidence IDs.")
+        if financing_value or depreciation_value:
+            warnings.append("Financing and depreciation values are scenario assumptions.")
         reference = self._save(
             "enterprise_budget",
             filename,
             XLSX_MIME,
             buffer.getvalue(),
             {
-                "currency": currency[:20],
+                "currency": currency_value,
+                "geography": geography_value,
+                "as_of_date": effective_date,
                 "total_cost": total_cost,
                 "total_revenue": total_revenue,
-                "net_before_financing_tax": total_revenue - total_cost,
+                "net_before_financing_tax": net_before_financing_tax,
+                "net_after_financing_depreciation_before_tax": net_margin,
+                "downside_margin": downside_margin,
+                "input_status_counts": status_counts,
+                "impact_count": len(normalized_impacts),
+                **provenance,
             },
         )
         return {
             **reference.to_dict(),
-            "currency": currency[:20],
+            "currency": currency_value,
+            "geography": geography_value,
+            "as_of_date": effective_date,
             "total_cost": round(total_cost, 2),
             "total_revenue": round(total_revenue, 2),
-            "net_before_financing_tax": round(total_revenue - total_cost, 2),
-            "warning": "Scenario estimate; not a profit guarantee.",
+            "net_before_financing_tax": round(net_before_financing_tax, 2),
+            "net_after_financing_depreciation_before_tax": round(net_margin, 2),
+            "expected_margin": round(net_margin, 2),
+            "margin_percent": round(margin_percent, 2) if margin_percent is not None else None,
+            "break_even": break_even,
+            "cash_flow": cash_flow,
+            "sensitivity": sensitivity,
+            "downside_margin": round(downside_margin, 2),
+            "impacts": normalized_impacts,
+            "input_status_counts": status_counts,
+            **provenance,
+            "warnings": warnings,
+            "warning": warnings[0],
         }
 
 

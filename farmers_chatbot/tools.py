@@ -9,24 +9,24 @@ from typing import Any
 from .artifacts import ArtifactService, convert_agricultural_units
 from .config import TRUSTED_SEARCH_MAX_CALLS
 from .documents import search_project_chunks
-from .knowledge import KnowledgeIndex
 from .language import detect_language
-from .storage import EvidenceStore, load_logframe_status
+from .logframe import load_logframe_status
+from .release_knowledge import ReleaseKnowledgeGateway, ReleaseUnavailable
 from .trusted_sources import TrustedSourceClient
 
 
 class ToolRegistry:
     def __init__(
         self,
-        knowledge: KnowledgeIndex,
-        evidence_store: Any | None = None,
+        knowledge: ReleaseKnowledgeGateway,
+        evidence_store: Any,
         *,
         project_chunks: list[dict[str, Any]] | None = None,
         trusted_client: TrustedSourceClient | None = None,
         artifact_service: ArtifactService | None = None,
     ) -> None:
         self.knowledge = knowledge
-        self.evidence_store = evidence_store or EvidenceStore()
+        self.evidence_store = evidence_store
         self.project_chunks = project_chunks or []
         self.trusted_client = trusted_client
         self.artifact_service = artifact_service
@@ -59,6 +59,19 @@ class ToolRegistry:
                 }
             )
 
+    def for_release(
+        self, release_id: str | None, *, risk: str = "medium",
+        currentness: str = "stable",
+    ) -> ToolRegistry:
+        """Give each turn independent tool accounting and a fixed knowledge view."""
+        return ToolRegistry(
+            self.knowledge.for_release(release_id, risk=risk, currentness=currentness),
+            self.evidence_store,
+            project_chunks=self.project_chunks,
+            trusted_client=self.trusted_client,
+            artifact_service=self.artifact_service,
+        )
+
     def model_definitions(self) -> list[dict[str, Any]]:
         """Return only tools safe for autonomous model requests."""
 
@@ -68,7 +81,7 @@ class ToolRegistry:
                 "function": {
                     "name": "search_knowledge",
                     "description": (
-                        "Search the approved/draft bilingual RAISE knowledge base. "
+                        "Search the eligible reviewed bilingual RAISE knowledge release. "
                         "Use first for Lebanon and Akkar agricultural questions."
                     ),
                     "parameters": {
@@ -192,7 +205,20 @@ class ToolRegistry:
     @staticmethod
     def _artifact_definitions() -> list[dict[str, Any]]:
         text_array = {"type": "array", "items": {"type": "string"}, "maxItems": 50}
-        source_array = {"type": "array", "items": {"type": "string"}, "maxItems": 20}
+        source_array = {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 20,
+            "description": "Legacy unstructured sources; prefer evidence_ids.",
+        }
+        evidence_array = {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "pattern": r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            },
+            "maxItems": 50,
+        }
         language = {"type": "string", "enum": ["arabic", "english"]}
         return [
             {
@@ -208,6 +234,7 @@ class ToolRegistry:
                             "actions": text_array,
                             "assumptions": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "context", "actions", "language"],
@@ -228,6 +255,7 @@ class ToolRegistry:
                             "checks": text_array,
                             "escalation_signs": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "context", "checks", "language"],
@@ -249,6 +277,7 @@ class ToolRegistry:
                             "question_for_expert": {"type": "string"},
                             "urgent_signs": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": [
@@ -292,6 +321,7 @@ class ToolRegistry:
                             },
                             "assumptions": text_array,
                             "sources": source_array,
+                            "evidence_ids": evidence_array,
                             "language": language,
                         },
                         "required": ["title", "entries", "language"],
@@ -304,14 +334,19 @@ class ToolRegistry:
                 "function": {
                     "name": "calculate_enterprise_budget",
                     "description": (
-                        "Calculate a transparent scenario budget and create XLSX. "
-                        "Use only values supplied by the user or explicitly sourced."
+                        "Create a transparent XLSX enterprise budget with break-even, "
+                        "cash-flow, sensitivity, financing/depreciation, provenance, "
+                        "and sustainability impacts. Use only user-supplied values or "
+                        "values linked to evidence_ids."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "title": {"type": "string"},
                             "currency": {"type": "string"},
+                            "geography": {"type": "string"},
+                            "as_of_date": {"type": "string", "format": "date"},
+                            "evidence_ids": evidence_array,
                             "costs": {
                                 "type": "array",
                                 "maxItems": 100,
@@ -319,9 +354,21 @@ class ToolRegistry:
                                     "type": "object",
                                     "properties": {
                                         "item": {"type": "string"},
-                                        "quantity": {"type": "number"},
+                                        "quantity": {"type": "number", "minimum": 0},
                                         "unit": {"type": "string"},
-                                        "unit_cost": {"type": "number"},
+                                        "unit_cost": {"type": "number", "minimum": 0},
+                                        "category": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
                                     },
                                     "required": [
                                         "item",
@@ -339,9 +386,21 @@ class ToolRegistry:
                                     "type": "object",
                                     "properties": {
                                         "item": {"type": "string"},
-                                        "quantity": {"type": "number"},
+                                        "quantity": {"type": "number", "minimum": 0},
                                         "unit": {"type": "string"},
-                                        "unit_price": {"type": "number"},
+                                        "unit_price": {"type": "number", "minimum": 0},
+                                        "category": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
                                     },
                                     "required": [
                                         "item",
@@ -352,10 +411,80 @@ class ToolRegistry:
                                     "additionalProperties": False,
                                 },
                             },
+                            "financing_cost": {"type": "number", "minimum": 0},
+                            "depreciation_cost": {"type": "number", "minimum": 0},
+                            "sensitivity_scenarios": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "quantity_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                        "price_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                        "cost_change_percent": {
+                                            "type": "number",
+                                            "minimum": -100,
+                                            "maximum": 1000,
+                                        },
+                                    },
+                                    "required": ["name"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "impacts": {
+                                "type": "array",
+                                "maxItems": 50,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "category": {
+                                            "type": "string",
+                                            "enum": [
+                                                "water",
+                                                "fertilizer",
+                                                "pesticide",
+                                                "energy",
+                                                "labor",
+                                            ],
+                                        },
+                                        "quantity": {"type": "number", "minimum": 0},
+                                        "unit": {"type": "string"},
+                                        "period": {"type": "string"},
+                                        "value_status": {
+                                            "type": "string",
+                                            "enum": [
+                                                "user_provided",
+                                                "sourced",
+                                                "assumption",
+                                                "estimated",
+                                            ],
+                                        },
+                                        "evidence_id": {"type": "string"},
+                                    },
+                                    "required": ["category", "quantity", "unit"],
+                                    "additionalProperties": False,
+                                },
+                            },
                             "assumptions": text_array,
                             "sources": source_array,
                         },
-                        "required": ["title", "currency", "costs", "revenues"],
+                        "required": [
+                            "title",
+                            "currency",
+                            "geography",
+                            "as_of_date",
+                            "costs",
+                            "revenues",
+                        ],
                         "additionalProperties": False,
                     },
                 },
@@ -393,16 +522,37 @@ class ToolRegistry:
         language = language or detect_language(query)
         if language not in {"arabic", "english"}:
             raise ValueError("language must be arabic or english")
-        results = self.knowledge.search(
-            query,
-            language=language,
-            top_k=max(1, min(int(top_k), 10)),
-        )
-        return {
+        try:
+            found = self.knowledge.search(
+                query,
+                language=language,
+                top_k=max(1, min(int(top_k), 10)),
+            )
+        except ReleaseUnavailable:
+            return {
+                "query": query,
+                "language": language,
+                "available": False,
+                "warning": (
+                    "The reviewed knowledge release is unavailable. Do not answer "
+                    "from unreviewed material; say the guidance cannot be checked."
+                ),
+                "results": [],
+            }
+        payload: dict[str, Any] = {
             "query": query,
             "language": language,
-            "results": [result.to_dict() for result in results],
+            "available": True,
+            "match": found.match,
+            "results": [result.to_dict() for result in found.results],
         }
+        if found.match == "broadened" and found.results:
+            payload["warning"] = (
+                "No passage matched every term, so these are partial keyword "
+                "matches. Treat them as weak and do not present them as a "
+                "direct answer unless they clearly address the question."
+            )
+        return payload
 
     def search_project_knowledge(self, query: str, top_k: int = 5) -> dict[str, Any]:
         results = search_project_chunks(
@@ -443,7 +593,10 @@ class ToolRegistry:
         return self.trusted_client.search(query, category).to_dict()
 
     def get_source(self, source_id: str) -> dict[str, Any]:
-        source = self.knowledge.get_source(source_id)
+        try:
+            source = self.knowledge.get_source(source_id)
+        except ReleaseUnavailable:
+            return {"found": False, "source_id": source_id, "available": False}
         if source is None:
             return {"found": False, "source_id": source_id}
         return {"found": True, "source": source}

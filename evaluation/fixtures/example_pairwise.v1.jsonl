@@ -1,0 +1,4 @@
+{"schema_version":"raise.eval.pairwise.v1","case_id":"SYN-EN-001","system_a":"example_system","system_b":"example_baseline","winner":"a","judge_id":"fixture-judge-1"}
+{"schema_version":"raise.eval.pairwise.v1","case_id":"SYN-EN-001","system_a":"example_system","system_b":"example_baseline","winner":"tie","judge_id":"fixture-judge-2"}
+{"schema_version":"raise.eval.pairwise.v1","case_id":"SYN-AR-001","system_a":"example_baseline","system_b":"example_system","winner":"b","judge_id":"fixture-judge-1"}
+{"schema_version":"raise.eval.pairwise.v1","case_id":"SYN-AR-001","system_a":"example_system","system_b":"example_baseline","winner":"b","judge_id":"fixture-judge-2"}

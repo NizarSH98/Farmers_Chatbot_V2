@@ -1,3 +1,5 @@
+from conftest import new_pilot_store
+
 from farmers_chatbot.auth import UserIdentity
 from farmers_chatbot.config import MAX_USER_WEEKLY_COST_USD
 from farmers_chatbot.pilot_store import PilotStore
@@ -36,7 +38,7 @@ def _record_query(store: PilotStore, user_id: str, cost: float) -> None:
 
 
 def test_weekly_usage_reflects_recorded_spend(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user = _make_user(store)
     _record_query(store, user["id"], 1.5)
     _record_query(store, user["id"], 2.0)
@@ -47,7 +49,7 @@ def test_weekly_usage_reflects_recorded_spend(tmp_path):
 
 
 def test_rate_limit_blocks_once_weekly_spend_reaches_the_cap(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user = _make_user(store)
     _record_query(store, user["id"], MAX_USER_WEEKLY_COST_USD)
 
@@ -57,14 +59,14 @@ def test_rate_limit_blocks_once_weekly_spend_reaches_the_cap(tmp_path):
 
 
 def test_spend_from_a_prior_week_does_not_count_toward_the_current_week(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user = _make_user(store)
     _record_query(store, user["id"], MAX_USER_WEEKLY_COST_USD)
 
     last_week = "2020-01-01T00:00:00+00:00"
     with store._connect() as connection:
         connection.execute(
-            "UPDATE query_events SET occurred_at = ?, day_utc = ?",
+            "UPDATE query_events SET occurred_at = %s, day_utc = %s",
             (last_week, "2020-01-01"),
         )
 
@@ -74,7 +76,7 @@ def test_spend_from_a_prior_week_does_not_count_toward_the_current_week(tmp_path
 
 
 def test_weekly_usage_is_isolated_per_user(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user_a = _make_user(store, "subject-a")
     user_b = _make_user(store, "subject-b")
     _record_query(store, user_a["id"], MAX_USER_WEEKLY_COST_USD)

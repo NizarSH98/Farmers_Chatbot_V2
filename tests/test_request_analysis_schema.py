@@ -20,6 +20,7 @@ ANALYSIS_RESPONSE = {
     "needs_clarification": False,
     "clarification_question": None,
     "clarification_options": [],
+    "clarification_questions": [],
     "retrieval_queries": ["potato irrigation Akkar"],
     "evidence_requirements": [],
     "output_shape": "short_answer",

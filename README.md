@@ -1,206 +1,119 @@
 # RAISE Akkar Farmer Assistant
 
-Arabic-first, bilingual agricultural decision support for farmers and agri-food stakeholders in Akkar and rural Lebanon.
+RAISE is an Arabic-first, bilingual agricultural decision-support application.
+It combines a Next.js workspace, a FastAPI assistant engine, versioned local
+knowledge, PostgreSQL/pgvector, and a rebuildable Qdrant search projection.
 
-The project combines:
+## Product direction
 
-- a source-traceable Akkar and ESDU knowledge base;
-- an authenticated Streamlit workspace with persistent chats and projects;
-- Google OIDC, Supabase Postgres/private storage, and local SQLite fallbacks;
-- Quick, Standard, Deep, and Source-only answer modes;
-- risk-based internal retrieval, trusted live search, and bounded tool calling;
-- a local MCP server;
-- a signed Meta WhatsApp test-number webhook service;
-- optional local Whisper speech-to-text;
-- consent-aware feedback and performance evidence;
-- direct traceability to `RAISE_Logframe_final.xlsx`.
+The exact experience to build is defined in the
+[product experience specification](docs/product/PRODUCT_EXPERIENCE_SPEC.md).
+It specifies novice-facing chat behavior, answer structure, reliability labels,
+projects, frontend/backend boundaries, delivery phases, and acceptance tests.
+Approve that contract before beginning the UI/backend redesign.
 
-> **Pilot status:** The software and strengthened knowledge base are under internal review. The knowledge base is not an official ESDU publication until ESDU approves its content, Arabic field language, title, and publication status.
+## Repository map
 
-## Why this exists
+| Path | Purpose |
+| --- | --- |
+| apps/web | Next.js browser application and same-origin API proxy |
+| farmers_chatbot | FastAPI, assistant pipeline, persistence, retrieval, auth, and storage package |
+| migrations | Ordered Alembic PostgreSQL schema revisions |
+| knowledge_base | Reviewed bilingual knowledge and deterministic build inputs |
+| evaluation | Versioned evaluation datasets and reports |
+| scripts | Operator, bootstrap, evaluation, and maintenance commands |
+| deploy | Backup and restore container scripts |
+| docs | Active product, architecture, operations, governance, and template index |
+| legal | Bilingual user agreement and privacy text rendered by the API |
+| config | Versioned non-secret source/model registries |
+| tests | Backend, integration, migration, storage, and policy tests |
 
-The goal is to make useful agricultural knowledge easier to access for Lebanese farmers, starting with Akkar. A strong answer must be more than fluent: it should fit the farmer's locality and production system, expose its sources and limitations, support Arabic use, learn from field feedback, and avoid pretending that fast-changing prices, weather, alerts, or regulations are static facts.
+Start with [the documentation map](docs/README.md), the
+[frontend map](apps/web/README.md), or the
+[backend map](farmers_chatbot/README.md) instead of browsing filenames.
 
-## Current capabilities
-
-- 21 bilingual Akkar-focused knowledge items with stable IDs and institutional sources.
-- Hybrid word/character retrieval in English and Arabic.
-- Source cards showing knowledge ID, evidence class, review status, risk class, and source links.
-- Current mode profiles:
-  - **Quick:** low-cost, short response.
-  - **Standard:** default balance.
-  - **Deep:** more retrieval, reasoning effort, and tool rounds.
-  - **Source only:** no general model knowledge.
-- Persistent, ownership-checked conversations, projects, uploads, artifacts,
-  feedback, quotas, and 30-day retention.
-- Safe internal tools include:
-  - `search_knowledge`
-  - `search_project_knowledge`
-  - `search_trusted_sources`
-  - `get_verified_source`
-  - `calculate_enterprise_budget`
-  - `convert_agricultural_units`
-  - deterministic action plan, checklist, crop calendar, and referral artifacts
-  - `get_source`
-  - `get_logframe_status`
-  - `record_feedback` with explicit consent
-- Local-stdio MCP server exposing bounded knowledge, source, conversion, artifact,
-  logframe, and feedback tools without shell or arbitrary URL access.
-- FastAPI WhatsApp pilot adapter with signature/phone-ID verification,
-  deduplication, HMAC identities, commands, and shared quotas.
-- Online Edge TTS with explicit disclosure.
-- Optional local Whisper input when the voice dependencies are installed.
-
-## Knowledge structure
-
-The editable knowledge source is:
+## Runtime architecture
 
 ```text
-knowledge_base/
-├── guide.json       # bilingual reviewed-item candidates
-├── sources.json     # source register
-└── README.md        # review rules
+Internet
+  -> Dokploy / Traefik (TLS)
+  -> Next.js web :3000
+       -> same-origin /api proxy
+       -> FastAPI :8000
+            -> PostgreSQL + pgvector :5432 (authoritative)
+            -> Qdrant :6333 (rebuildable projection)
+            -> private local volume or S3-compatible storage
+            -> OpenRouter when connected generation is enabled
+
+GitHub Actions -> GHCR SHA-tagged images -> Dokploy Compose deployment
+PostgreSQL dump + local private files -> encrypted off-VPS restic repository
 ```
 
-`scripts/build_guide.py` renders the structured source into
-`knowledge_base/RAISE_Akkar_Agricultural_Guide.md` for internal review.
+Only the Next.js service is publicly routed. The API, database, and Qdrant use
+Docker networks. There is no Redis or always-on worker because the current
+application has no durable queue workload that justifies either service.
 
-The legacy `Agricultural Guide for Lebanon.pdf` remains for migration and comparison. The application now retrieves from the structured knowledge base so claims can be reviewed, versioned, and retired individually.
+## Local start
 
-The initial expansion covers:
-
-- Akkar plain versus upland/terraced contexts;
-- dated Ministry of Agriculture production signals;
-- potato, greenhouse, orchard, water, soil, livestock, post-harvest, and market decision checklists;
-- ESDU's participatory-development and living-lab approach;
-- ESDU work on livestock resilience, sprouting units, composting, rainwater harvesting, zaatar/coriander, dairy, rural women, community-market links, and legumes;
-- safety boundaries and expert escalation;
-- dynamic information that must come from a timestamped tool.
-
-All knowledge items are currently `draft`. Technical and field-language approval is still required.
-
-## Local setup
-
-Use Python 3.12:
+Prerequisites are Docker Desktop and PowerShell. Host Python and Node are only
+needed for development checks, not to run the stack.
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-streamlit run rag_chatbot.py
+.\scripts\raise.ps1 start -Rebuild
+.\scripts\raise.ps1 build-graph
+.\scripts\raise.ps1 smoke
+.\scripts\raise.ps1 status
 ```
 
-Add a deployment-specific OpenRouter key to `.env` if connected generation is required:
+The local overlay binds only to loopback: web 3000, API 8000, PostgreSQL 55432,
+and Qdrant 6433. Local Compose explicitly disables login. Pilot and production
+startup fail closed unless OIDC, HTTPS, secrets, migrations, and storage are
+configured correctly.
 
-```env
-OPENROUTER_API_KEY=your_key_here
-```
-
-Without a key, the app remains usable as a retrieval interface and clearly labels that fallback.
-
-## Voice options
-
-Voice boundaries are explicit:
-
-- Browser recording plus Whisper can run locally after installing `requirements-voice.txt`.
-- Edge TTS is an **online** service and sends answer text to Microsoft to generate audio.
-- The app does not claim that Edge TTS is offline.
-
-Install optional local transcription:
+Useful commands:
 
 ```powershell
-python -m pip install -r requirements-voice.txt
+.\scripts\raise.ps1 logs
+.\scripts\raise.ps1 evaluate
+.\scripts\raise.ps1 ablate
+.\scripts\raise.ps1 graph-profile
+.\scripts\raise.ps1 export
+.\scripts\raise.ps1 stop
 ```
 
-The first Whisper use downloads the selected model. Configure `WHISPER_MODEL` in `.env`.
-
-## MCP
-
-The official MCP Python SDK is constrained to the current stable v1 line:
+## Development gates
 
 ```powershell
-python mcp_server.py
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe scripts\release_preflight.py
+.\.venv\Scripts\python.exe -m ruff check farmers_chatbot scripts tests mcp_server.py
+.\.venv\Scripts\python.exe -m pytest -q -m "not arabic"
+.\.venv\Scripts\python.exe -m pytest -q -m arabic
+npm ci --prefix apps/web
+npm run typecheck --prefix apps/web
+npm run lint --prefix apps/web
+npm run test --prefix apps/web
+npm run build --prefix apps/web
+docker compose -f compose.yaml config --quiet
+docker compose -f compose.yaml -f compose.override.yaml config --quiet
 ```
 
-The default transport is `stdio`. Available tools:
+## Operations
 
-- `search_knowledge`
-- `get_source`
-- `get_verified_source`
-- `search_project_knowledge`
-- `search_trusted_sources`
-- `convert_agricultural_units`
-- `generate_farm_action_plan`
-- `generate_inspection_checklist`
-- `generate_crop_calendar`
-- `generate_expert_referral_brief`
-- `get_logframe_status`
-- `record_feedback`
+The [documentation map](docs/README.md) identifies the authoritative file for
+each kind of work. The operating source of truth is
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). It covers GHCR,
+fresh VPS setup, Dokploy, environment, migrations, bootstrap, backups, restores,
+updates, rollback, monitoring, troubleshooting, and disaster recovery.
 
-The server deliberately does not expose shell execution, arbitrary filesystem access, unrestricted URL fetching, or generic database queries. Do not publish an unauthenticated HTTP transport.
+See also [architecture](docs/ARCHITECTURE.md), [database
+migrations](docs/DATABASE_MIGRATIONS.md), and the [migration
+report](docs/MIGRATION_REPORT.md).
 
-## Tests and logframe retrieval gate
+## Safety and license
 
-Install development dependencies and run:
-
-```powershell
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-python scripts/evaluate_retrieval.py
-```
-
-The retrieval evaluator writes a generated report under `reports/generated/`. The included 30-question bilingual set is a candidate benchmark. Its results do not become contractual evidence until the project team approves the questions and relevance labels.
-
-## Logframe and governance documents
-
-- `docs/LOGFRAME_TRACEABILITY.md`
-- `docs/GOVERNANCE_AND_VALIDATION.md`
-- `docs/INTERNAL_REVIEW.md`
-- `docs/ARCHITECTURE.md`
-- `docs/UI_UX.md`
-- `docs/FIELD_SESSION_TEMPLATE.md`
-- `docs/ESDU_INTERNAL_KNOWLEDGE_INTAKE.md`
-- `docs/STAKEHOLDER_TRACKER_SCHEMA.md`
-- `docs/RRO.md`
-- `docs/DEPLOYMENT.md`
-- `docs/PILOT_DEPLOYMENT_RUNBOOK.md`
-- `docs/PILOT_PROVIDER_SETUP_CHECKLIST.md`
-- `docs/DATA_PORTABILITY.md`
-- `docs/POLICY_APPROVAL_CHECKLIST.md`
-- `docs/PILOT_READINESS_2026-07-29.md`
-- `docs/PILOT_READINESS_2026-08-01.md`
-- `docs/SOURCE_DOCUMENT_INTAKE.md`
-
-Software metrics and contractual achievement are reported separately. Code cannot substitute for 40–50 stakeholder records, four feedback sessions, or approval of the final RRO.
-
-## Deployment
-
-The first internal deployment target is Streamlit Community Cloud with Google OIDC
-and portable PostgreSQL/private object storage currently supplied by Supabase,
-followed by the optional Render/Meta test-number service only after web gates pass.
-Use `docs/PILOT_DEPLOYMENT_RUNBOOK.md` for owner setup, managed secrets,
-20–30-user rehearsal gates, freeze, rollback, and WhatsApp verification. The
-contractual workbook is local evidence and is deliberately excluded from deployed
-runtime source.
-Continue development on `pilot`; deploy Streamlit from the protected
-`release/pilot-2026-08` branch so Community Cloud's automatic GitHub updates cannot
-change the frozen test build.
-
-## Safety and privacy
-
-The assistant is decision support, not a substitute for an agronomist, veterinarian, laboratory, engineer, food-safety professional, or competent authority. It must not invent pesticide/veterinary instructions, current alerts, market prices, or regulations.
-
-Connected generation sends the farmer's text, recent conversation context, and retrieved passages to the configured model provider. Online TTS sends answer text to its provider. Do not collect names, phone numbers, precise personal location, or other personal data unless an approved pilot process requires it and obtains informed consent.
-
-The web and WhatsApp channels enforce a versioned lifecycle-wide user agreement
-and privacy policy before normal use. Both documents are also readable before web
-sign-in.
-Users can export active workspace data and delete their account/private content.
-The agreement is an operational template and still requires institutional
-privacy/legal approval before public or production use.
-
-## License
-
-The software is available under the MIT License. Knowledge-source copyrights and the right to use ESDU/AUB names or branding remain separate and must be reviewed before publication.
+RAISE is decision support, not a substitute for an agronomist, veterinarian,
+laboratory, engineer, food-safety professional, or competent authority.
+Software is MIT-licensed. Knowledge-source copyrights and institutional naming
+rights remain separate.

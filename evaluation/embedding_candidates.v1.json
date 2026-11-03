@@ -1,0 +1,31 @@
+{
+  "schema_version": "raise.embedding_candidates.v1",
+  "observed_at": "2026-08-11",
+  "source": "https://openrouter.ai/api/v1/embeddings/models",
+  "candidates": [
+    {
+      "model": "google/gemini-embedding-2-preview",
+      "dimensions": 768,
+      "stability": "preview",
+      "input_cost_per_token_usd": 0.0000002
+    },
+    {
+      "model": "google/gemini-embedding-2-preview",
+      "dimensions": 1536,
+      "stability": "preview",
+      "input_cost_per_token_usd": 0.0000002
+    },
+    {
+      "model": "openai/text-embedding-3-large",
+      "dimensions": 768,
+      "stability": "stable",
+      "input_cost_per_token_usd": 0.00000013
+    },
+    {
+      "model": "openai/text-embedding-3-large",
+      "dimensions": 1536,
+      "stability": "stable",
+      "input_cost_per_token_usd": 0.00000013
+    }
+  ]
+}

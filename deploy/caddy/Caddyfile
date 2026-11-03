@@ -1,0 +1,21 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	# Next.js already compresses; leaving `encode` off keeps SSE answer
+	# streaming unbuffered.
+	reverse_proxy web:3000 {
+		flush_interval -1
+	}
+
+	# Project files are capped at 10 MB by the API; this is an outer bound.
+	request_body {
+		max_size 20MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

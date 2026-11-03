@@ -10,6 +10,8 @@ const copy = {
     privacyNote: "لن نطلب كلمة مرور Google، ولن نشارك محادثاتك مع مستخدمين آخرين.",
     newChat: "محادثة جديدة",
     conversations: "المحادثات",
+    hideConversations: "إخفاء قائمة المحادثات",
+    showConversations: "إظهار قائمة المحادثات",
     search: "ابحث في المحادثات",
     noConversations: "لا توجد محادثات بعد",
     welcome: "كيف يمكنني مساعدتك اليوم؟",
@@ -20,6 +22,9 @@ const copy = {
     attach: "إرفاق صورة",
     settings: "الإعدادات",
     close: "إغلاق",
+    cancel: "\u0625\u0644\u063a\u0627\u0621",
+    saveChanges: "\u062d\u0641\u0638 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a",
+    imageAttached: "\u0635\u0648\u0631\u0629 \u0645\u0631\u0641\u0642\u0629",
     language: "اللغة",
     mode: "طريقة الإجابة",
     model: "النموذج",
@@ -50,13 +55,42 @@ const copy = {
     agreementReject: "تسجيل الخروج",
     loading: "جارٍ التحميل…",
     analyzing: "أفهم السؤال وأراجع المعلومات المناسبة…",
+    thinkingLines: [
+      "أقرأ سؤالك بعناية…",
+      "أبحث في قاعدة المعرفة الزراعية…",
+      "أراجع المصادر المعتمدة…",
+      "أربط المعلومات ببعضها…",
+      "أتحقق من ملاءمة التوصية لعكار…",
+      "أراعي مرحلة نمو المحصول والتربة…",
+      "أرتّب الخطوات العملية…",
+      "أتأكد من ذكر المصادر…",
+    ],
     generation: "أُعدّ جواباً عملياً…",
     verification: "أتحقق من الدقة والسلامة…",
     uploadError: "تعذّر رفع الصورة. استخدم JPG أو PNG بحجم أقل من 5 ميغابايت.",
     error: "حدث خطأ. حاول مرة أخرى بعد قليل.",
     imageReady: "الصورة جاهزة للإرسال",
+    imageQuestion: "\u064a\u0631\u062c\u0649 \u062a\u062d\u0644\u064a\u0644 \u0647\u0630\u0647 \u0627\u0644\u0635\u0648\u0631\u0629.",
+    somethingElse: "\u0634\u064a\u0621 \u0622\u062e\u0631",
+    typeOwnOption: "\u0627\u0643\u062a\u0628 \u062e\u064a\u0627\u0631\u0643...",
+    previousQuestion: "\u0627\u0644\u0633\u0624\u0627\u0644 \u0627\u0644\u0633\u0627\u0628\u0642",
+    nextQuestion: "\u0627\u0644\u0633\u0624\u0627\u0644 \u0627\u0644\u062a\u0627\u0644\u064a",
+    submitOption: "\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0627\u062e\u062a\u064a\u0627\u0631",
+    submitAnswers: "\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0625\u062c\u0627\u0628\u0627\u062a",
     warning: "تنبيه",
-    disclaimer: "المساعد يدعم القرار ولا يستبدل الخبير المحلي في الحالات عالية الخطورة."
+    disclaimer: "المساعد يدعم القرار ولا يستبدل الخبير المحلي في الحالات عالية الخطورة.",
+    workspace: "المشاريع والملفات",
+    projects: "المشاريع",
+    projectName: "اسم المشروع",
+    projectInstructions: "تعليمات المشروع",
+    createProject: "إنشاء مشروع",
+    projectChat: "محادثة ضمن المشروع",
+    documents: "ملفات المشروع",
+    artifacts: "الملفات المنشأة",
+    uploadDocument: "رفع ملف",
+    download: "تنزيل",
+    exportData: "تصدير بياناتي",
+    noItems: "لا توجد عناصر بعد"
   },
   en: {
     appName: "RAISE",
@@ -67,6 +101,8 @@ const copy = {
     privacyNote: "We never receive your Google password or share chats with other users.",
     newChat: "New conversation",
     conversations: "Conversations",
+    hideConversations: "Hide conversation list",
+    showConversations: "Show conversation list",
     search: "Search conversations",
     noConversations: "No conversations yet",
     welcome: "How can I help today?",
@@ -77,6 +113,9 @@ const copy = {
     attach: "Attach image",
     settings: "Settings",
     close: "Close",
+    cancel: "Cancel",
+    saveChanges: "Save changes",
+    imageAttached: "Image attached",
     language: "Language",
     mode: "Answer mode",
     model: "Model",
@@ -107,15 +146,55 @@ const copy = {
     agreementReject: "Sign out",
     loading: "Loading…",
     analyzing: "Understanding the question and checking relevant information…",
+    thinkingLines: [
+      "Reading your question carefully…",
+      "Searching the agricultural knowledge base…",
+      "Reviewing approved sources…",
+      "Connecting related guidance…",
+      "Checking what applies to Akkar…",
+      "Considering crop stage and soil…",
+      "Putting the practical steps in order…",
+      "Making sure every claim is cited…",
+    ],
     generation: "Preparing a practical answer…",
     verification: "Checking accuracy and safety…",
     uploadError: "Image upload failed. Use JPG or PNG under 5 MB.",
     error: "Something went wrong. Please try again.",
     imageReady: "Image ready to send",
+    imageQuestion: "Please analyze this image.",
+    somethingElse: "Something else",
+    typeOwnOption: "Write your own answer...",
+    previousQuestion: "Previous question",
+    nextQuestion: "Next question",
+    submitOption: "Use this answer",
+    submitAnswers: "Continue with these answers",
     warning: "Warning",
-    disclaimer: "Decision support does not replace a qualified local expert for high-risk cases."
+    disclaimer: "Decision support does not replace a qualified local expert for high-risk cases.",
+    workspace: "Projects and files",
+    projects: "Projects",
+    projectName: "Project name",
+    projectInstructions: "Project instructions",
+    createProject: "Create project",
+    projectChat: "Start project chat",
+    documents: "Project documents",
+    artifacts: "Generated artifacts",
+    uploadDocument: "Upload document",
+    download: "Download",
+    exportData: "Export my data",
+    noItems: "Nothing here yet"
   }
 } as const;
 
-export type CopyKey = keyof typeof copy.ar;
-export const t = (language: Language, key: CopyKey): string => copy[language][key];
+// Only string entries are addressable through `t`; list entries (such as the
+// rotating thinking lines) have their own accessor so the return type stays a
+// plain string at every call site.
+type Copy = typeof copy.ar;
+export type CopyKey = {
+  [K in keyof Copy]: Copy[K] extends string ? K : never;
+}[keyof Copy];
+
+export const t = (language: Language, key: CopyKey): string =>
+  copy[language][key] as string;
+
+export const thinkingLines = (language: Language): readonly string[] =>
+  copy[language].thinkingLines;

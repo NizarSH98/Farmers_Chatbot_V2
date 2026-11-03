@@ -113,15 +113,14 @@ review and the limitations in the User Agreement.
 
 Configured providers may include:
 
-- Google for OpenID Connect account authentication;
-- Streamlit Community Cloud/Snowflake or another approved application host;
-- PostgreSQL and private object-storage providers, currently compatible with
-  Supabase but designed for export and migration;
+- an approved standards-based OpenID Connect identity provider;
+- a Docker-based application host operated by the project;
+- PostgreSQL and private local-volume or S3-compatible object storage;
 - OpenRouter and the selected model providers for AI generation and approved web
   search;
 - Microsoft Edge text-to-speech when online speech output is enabled;
-- Meta WhatsApp Cloud API and Render or another approved webhook host when the
-  messaging channel is enabled; and
+- Meta WhatsApp Cloud API and an approved webhook host when the messaging
+  channel is enabled; and
 - reviewed public scientific, agricultural, economic, food-security, and
   government sources reached through bounded retrieval tools.
 

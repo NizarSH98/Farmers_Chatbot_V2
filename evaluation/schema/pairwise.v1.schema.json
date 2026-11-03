@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "raise.eval.pairwise.v1",
+  "title": "RAISE pairwise judgment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "case_id", "system_a", "system_b", "winner", "judge_id"
+  ],
+  "properties": {
+    "schema_version": {"const": "raise.eval.pairwise.v1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "system_a": {"type": "string", "minLength": 1},
+    "system_b": {"type": "string", "minLength": 1},
+    "winner": {"enum": ["a", "b", "tie"]},
+    "judge_id": {"type": "string", "minLength": 1}
+  }
+}

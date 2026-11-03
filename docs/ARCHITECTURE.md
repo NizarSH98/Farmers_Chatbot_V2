@@ -1,95 +1,75 @@
-# Target Architecture
+# Portable target architecture
 
-Last updated: 2026-07-29
+Last updated: 2026-09-01
 
-## Product boundary
+## Boundaries
 
-The product is an Arabic-first, bilingual agricultural knowledge assistant for Akkar and other Lebanese rural contexts. It should remain useful on low-bandwidth devices and should make the origin, date, geography, and confidence of advice visible.
+The deployable unit is standard Docker Compose. GitHub stores source, GitHub
+Actions tests/builds, GHCR stores immutable images, and Dokploy operates Compose
+on a Linux VPS. Dokploy and the VPS vendor are replaceable: the same images and
+`compose.yaml` run with ordinary Docker Compose.
 
-## Components
+## Services
 
-1. **Knowledge layer**
-   - Versioned Markdown/JSON knowledge items instead of an opaque PDF-only corpus.
-   - Stable source IDs and chunk metadata.
-   - Separate static validated guidance from dynamic information.
-2. **Retrieval layer**
-   - Bilingual lexical retrieval as the reproducible baseline.
-   - Benchmark-driven upgrade path to multilingual embeddings and hybrid ranking.
-   - Deterministic source cards and confidence signals.
-3. **Assistant layer**
-   - OpenRouter-compatible chat client.
-   - Quick, Standard, Deep, and Source-only modes.
-   - Reasoning effort is sent only to models whose capability registry allows it.
-   - A bounded tool loop; tools never execute merely because model text resembles a command.
-4. **Tool layer**
-   - Search validated knowledge.
-   - Read a source record.
-   - Read logframe status.
-   - Record structured, consent-aware feedback.
-   - Future dynamic tools: LARI/MoA alerts, weather, market information, and referrals after source/API approval.
-5. **MCP layer**
-   - The same safe tool implementations are exposed through an MCP server.
-   - Local default transport is `stdio`; authenticated Streamable HTTP is a deployment option.
-   - The MCP server does not expose arbitrary filesystem, shell, URL-fetch, or database-query tools.
-6. **Channel layer**
-   - Streamlit website first.
-   - Telegram/WhatsApp adapters call the same assistant service and governance rules.
-   - Channel credentials and webhook deployment are external configuration.
-7. **Evidence layer**
-   - Structured operational events, feedback status, benchmark reports, performance reports, and release records.
-   - Personal data is kept outside the public repository.
+| Service | Responsibility | Network/port | Persistence |
+| --- | --- | --- | --- |
+| `web` | Next.js standalone server and same-origin API proxy | public through Traefik, internal 3000 | none |
+| `api` | FastAPI, auth session, assistant, uploads, REST/SSE | private 8000 | private-file and model-cache volumes |
+| `migrate` | one-shot `alembic upgrade head` gate | data network | PostgreSQL |
+| `postgres` | authoritative relational, graph, lexical, and pgvector data | internal 5432 | named volume |
+| `qdrant` | exact-release dense/sparse search projection | internal 6333 | named volume; rebuildable |
+| `bootstrap` | opt-in initial/rebuild graph release job | tools profile | PostgreSQL, Qdrant, model cache |
+| `backup` | pg_dump plus private files to encrypted restic repository | backup profile, outbound only | work volume; repository is off-VPS |
 
-## Interaction flow
+There is no Redis or separate worker. Current background work is request-bound
+or an explicit operator job. If future work requires retryable asynchronous
+jobs, add a queue and worker as an independent architecture change.
+
+## Request and identity flow
 
 ```text
-Farmer
-  -> Web / approved messaging channel
-  -> language + mode selection
-  -> retrieval and safe internal tools
-  -> model generation (when configured)
-  -> answer + source cards + limitations + escalation
-  -> optional feedback event
-  -> logframe evidence reports
+browser -> HTTPS -> web
+browser -> /api/* -> web runtime proxy -> api
+api -> OIDC authorization-code + PKCE provider
+api -> signed HttpOnly SameSite application session + CSRF token
+api -> PostgreSQL / Qdrant / private storage
 ```
 
-## Thinking and effort modes
+The browser never receives database, storage, OIDC client-secret, or backend
+network credentials. The application stores issuer/subject identity claims, not
+provider access or refresh tokens. Access allows any verified email, an email
+allowlist, or a domain allowlist.
 
-| Mode | Intended use | Retrieval | Reasoning effort | General knowledge | Tool budget |
-|---|---|---:|---|---|---:|
-| Quick | Short routine question on weak connections | 4 passages | minimal/low | Clearly labeled | 1 round |
-| Standard | Default farmer guidance | 6 passages | medium | Clearly labeled | 2 rounds |
-| Deep | Planning or multi-factor comparison | 9 passages | high | Clearly labeled | 3 rounds |
-| Source-only | Auditable guide lookup | 10 passages | low | Disabled | 1 round |
+## Data authority
 
-Internal reasoning is never displayed as hidden chain-of-thought. The interface may show a concise answer plan, tools used, sources used, and limitations.
+PostgreSQL is authoritative for users, consent, conversations, projects,
+document metadata, feedback, usage, immutable knowledge releases, evidence,
+claims, entities, relations, projection state, and activation history. Alembic
+is the sole managed schema mechanism.
 
-## Deployment profiles
+The pgvector extension, vector dimensions, embedding approvals, and similarity
+behavior are preserved. Qdrant is a rebuildable projection of an activated
+PostgreSQL release; it is not in the disaster-recovery backup set.
 
-### Local connected
+Private files use one interface:
 
-- Local retrieval and application runtime.
-- OpenRouter for generation.
-- Optional online TTS.
+- `STORAGE_BACKEND=local`: named volume included in restic backups.
+- `STORAGE_BACKEND=s3`: private AWS S3 or S3-compatible bucket.
 
-### Local offline
+Objects use safe relative keys and cannot be silently overwritten.
 
-- Local retrieval.
-- Local model runtime through a configurable OpenAI-compatible endpoint.
-- Local speech-to-text and text-to-speech models.
-- No dynamic web tools.
+## Deployment invariants
 
-### Pilot cloud
+- Production images are prebuilt and selected by tag; the VPS does not compile.
+- Only `web:3000` attaches to a public domain.
+- Base Compose publishes no host ports and has an internal data network.
+- The API waits for a successful migration and healthy Qdrant.
+- Stateful services use named volumes.
+- Containers have no Docker socket or privileged mode.
+- Application containers run as non-root users.
+- TLS terminates at Dokploy/Traefik.
+- Logs go to stdout/stderr.
 
-- Streamlit or containerized web service.
-- Deployment-specific API key with spending cap and model allowlist.
-- Persistent feedback/evidence store.
-- Monitoring and controlled access.
-
-## Decisions still requiring team approval
-
-- Telegram versus WhatsApp for the contractual pilot.
-- Approved model/provider data-retention policy.
-- Whether the strengthened guide is formally an ESDU publication or an ESDU-supported project knowledge base.
-- Expert owners for crops, livestock, water, food safety, business/value chains, and Arabic editorial review.
-- Approved dynamic sources and update frequency.
-
+The reform does not alter approved embeddings, dimensions, retrieval routes,
+evidence lineage, assistant modes, model allowlists, or safety rules.
+PostgreSQL lexical/graph retrieval remains the Qdrant-outage fallback.

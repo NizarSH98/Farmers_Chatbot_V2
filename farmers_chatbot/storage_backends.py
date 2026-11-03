@@ -1,19 +1,20 @@
-"""Private file storage for local development and Supabase Storage."""
+"""Provider-neutral private file storage for local volumes and S3 APIs."""
 
 from __future__ import annotations
 
 import mimetypes
 from pathlib import Path, PurePosixPath
-from typing import Protocol
-from urllib.parse import quote
-
-import requests
+from typing import Any, Protocol
 
 from .config import (
     LOCAL_FILE_ROOT,
-    SUPABASE_SERVICE_ROLE_KEY,
-    SUPABASE_STORAGE_BUCKET,
-    SUPABASE_URL,
+    S3_ACCESS_KEY_ID,
+    S3_BUCKET,
+    S3_ENDPOINT_URL,
+    S3_FORCE_PATH_STYLE,
+    S3_REGION,
+    S3_SECRET_ACCESS_KEY,
+    STORAGE_BACKEND,
 )
 
 
@@ -65,85 +66,94 @@ class LocalPrivateStorage:
         return None
 
 
-class SupabasePrivateStorage:
+class S3PrivateStorage:
+    """Private object storage compatible with AWS S3 and S3-like providers."""
+
     def __init__(
         self,
-        url: str = SUPABASE_URL,
-        service_role_key: str = SUPABASE_SERVICE_ROLE_KEY,
-        bucket: str = SUPABASE_STORAGE_BUCKET,
-        timeout_seconds: float = 30,
+        *,
+        bucket: str = S3_BUCKET,
+        endpoint_url: str = S3_ENDPOINT_URL,
+        region: str = S3_REGION,
+        access_key_id: str = S3_ACCESS_KEY_ID,
+        secret_access_key: str = S3_SECRET_ACCESS_KEY,
+        force_path_style: bool = S3_FORCE_PATH_STYLE,
+        client: Any | None = None,
     ) -> None:
-        if not url or not service_role_key:
-            raise ValueError("Supabase Storage is not configured")
-        self.url = url.rstrip("/")
-        self.key = service_role_key
+        if not bucket:
+            raise ValueError("S3 private storage requires S3_BUCKET")
         self.bucket = bucket
-        self.timeout_seconds = timeout_seconds
+        if client is not None:
+            self.client = client
+            return
+        import boto3
+        from botocore.config import Config
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.key}",
-            "apikey": self.key,
-        }
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url or None,
+            region_name=region,
+            aws_access_key_id=access_key_id or None,
+            aws_secret_access_key=secret_access_key or None,
+            config=Config(
+                signature_version="s3v4",
+                s3={
+                    "addressing_style": "path" if force_path_style else "auto",
+                },
+            ),
+        )
 
-    def _object_url(self, path: str, operation: str = "object") -> str:
-        safe = safe_storage_path(path)
-        encoded = "/".join(quote(part, safe="") for part in safe.split("/"))
-        return f"{self.url}/storage/v1/{operation}/{quote(self.bucket)}/{encoded}"
+    @staticmethod
+    def _not_found(exc: Exception) -> bool:
+        response = getattr(exc, "response", {})
+        error = response.get("Error", {}) if isinstance(response, dict) else {}
+        return str(error.get("Code") or "") in {"404", "NoSuchKey", "NotFound"}
 
     def put(self, path: str, data: bytes, content_type: str | None = None) -> None:
-        mime = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
-        response = requests.post(
-            self._object_url(path),
-            headers={**self._headers(), "Content-Type": mime, "x-upsert": "false"},
-            data=data,
-            timeout=self.timeout_seconds,
+        key = safe_storage_path(path)
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:  # botocore is optional until S3 is selected
+            if not self._not_found(exc):
+                raise RuntimeError("Could not verify the private object target") from exc
+        else:
+            raise RuntimeError("Refusing to overwrite an existing private object")
+        mime = content_type or mimetypes.guess_type(key)[0] or "application/octet-stream"
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=mime,
         )
-        if response.status_code not in {200, 201}:
-            raise RuntimeError("Private file upload failed")
 
     def get(self, path: str) -> bytes:
-        response = requests.get(
-            self._object_url(path, "object/authenticated"),
-            headers=self._headers(),
-            timeout=self.timeout_seconds,
-        )
-        if response.status_code != 200:
-            raise FileNotFoundError("Private file is unavailable")
-        return response.content
+        try:
+            response = self.client.get_object(
+                Bucket=self.bucket,
+                Key=safe_storage_path(path),
+            )
+            return bytes(response["Body"].read())
+        except Exception as exc:  # normalize provider-specific missing-key errors
+            if self._not_found(exc):
+                raise FileNotFoundError("Private file is unavailable") from exc
+            raise
 
     def delete(self, path: str) -> None:
-        response = requests.delete(
-            f"{self.url}/storage/v1/object/{quote(self.bucket)}",
-            headers={**self._headers(), "Content-Type": "application/json"},
-            json={"prefixes": [safe_storage_path(path)]},
-            timeout=self.timeout_seconds,
-        )
-        if response.status_code not in {200, 204}:
-            raise RuntimeError("Private file deletion failed")
+        self.client.delete_object(Bucket=self.bucket, Key=safe_storage_path(path))
 
     def signed_url(self, path: str, expires_seconds: int = 600) -> str | None:
-        response = requests.post(
-            self._object_url(path, "object/sign"),
-            headers={**self._headers(), "Content-Type": "application/json"},
-            json={"expiresIn": max(60, min(int(expires_seconds), 3600))},
-            timeout=self.timeout_seconds,
+        return str(
+            self.client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": safe_storage_path(path)},
+                ExpiresIn=max(60, min(int(expires_seconds), 3600)),
+            )
         )
-        if response.status_code != 200:
-            return None
-        signed = response.json().get("signedURL") or response.json().get("signedUrl")
-        if not signed:
-            return None
-        if signed.startswith("http"):
-            return signed
-        if signed.startswith("/storage/v1/"):
-            return f"{self.url}{signed}"
-        if signed.startswith("/object/"):
-            return f"{self.url}/storage/v1{signed}"
-        return f"{self.url}/storage/v1/{signed.lstrip('/')}"
 
 
 def configured_file_storage() -> PrivateFileStorage:
-    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
-        return SupabasePrivateStorage()
-    return LocalPrivateStorage()
+    if STORAGE_BACKEND == "local":
+        return LocalPrivateStorage()
+    if STORAGE_BACKEND == "s3":
+        return S3PrivateStorage()
+    raise RuntimeError("STORAGE_BACKEND must be 'local' or 's3'")

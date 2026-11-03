@@ -1,0 +1,52 @@
+{
+  "distributions": {
+    "domains": {
+      "business": 40,
+      "crops": 40,
+      "cross_domain_sustainability": 40,
+      "greenhouse_climate": 40,
+      "ipm_safety": 40,
+      "irrigation": 40,
+      "livestock": 40,
+      "postharvest_food_safety": 40,
+      "services_opportunities": 40,
+      "soil": 40
+    },
+    "languages": {
+      "arabizi": 60,
+      "code": 60,
+      "en": 100,
+      "leb": 80,
+      "msa": 100
+    },
+    "risks": {
+      "critical": 60,
+      "high": 120,
+      "low": 100,
+      "medium": 120
+    },
+    "special": {
+      "image_handling": 20,
+      "multi_turn": 30,
+      "prompt_injection_or_poisoning": 30,
+      "stale_or_conflicting_source": 30
+    },
+    "tasks": {
+      "actionable_decision": 80,
+      "business_calculation": 40,
+      "fact_retrieval": 80,
+      "multi_hop_graph": 80,
+      "safety_currentness": 40,
+      "troubleshooting": 80
+    }
+  },
+  "hidden_cases": 160,
+  "hidden_sha256": "1eef2ed64890225bee2af940bb5153779bf143b2865c004daae936b4d8abc872",
+  "independent_human_review_complete": false,
+  "public_cases": 240,
+  "public_sha256": "2d36aa530aaeab41c73363c8d4a36bef40851254f9332ce21bc6bb7283756c94",
+  "release_id": "release_4debc9a9de849675835bb255",
+  "review_status": "source_anchored_golden_candidate",
+  "schema_version": "raise.eval.golden-candidate.v1",
+  "total_cases": 400
+}

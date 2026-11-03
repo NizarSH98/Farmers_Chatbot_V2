@@ -2,7 +2,7 @@
 
 Status: **DRAFT — not institutionally or legally approved**
 
-Policy version: `project-2026-08-v1`
+Policy version: `project-2026-09-v2`
 
 Applies to: the complete RAISE-ESDU Farmer Assistant lifecycle, including design,
 testing, deployment, operation, evaluation, replication, and retirement
@@ -49,12 +49,11 @@ managed `CONSENT_VERSION` must exactly match the policy version in the code.
 - [ ] Confirm the approved process for users under 18 or disable their access.
 - [ ] Confirm whether project evaluation is ordinary service evaluation or human-
   subjects research requiring ethics/IRB review and separate consent.
-- [ ] Approve international processing, including Streamlit Community Cloud
-  hosting in the United States and each configured AI/model provider.
+- [ ] Approve the selected VPS region and each configured AI/model provider.
 - [ ] Review provider terms, retention/training settings, data-processing
-  agreements, breach contacts, and deletion limitations for Google, Streamlit/
-  Snowflake, Supabase, OpenRouter and selected models; add Render and Meta only
-  when WhatsApp is enabled.
+  agreements, breach contacts, and deletion limitations for the OIDC provider,
+  VPS operator, object-storage/backup providers, OpenRouter and selected models;
+  add Meta only when WhatsApp is enabled.
 - [ ] Approve the 30-day schedule for application records and document the actual
   expiry schedules for backups, provider logs, OAuth records, and security logs.
 - [ ] Approve the privacy contact, complaint route, incident owner, response

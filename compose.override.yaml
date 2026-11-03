@@ -1,0 +1,73 @@
+# Local-only builds, development settings, and loopback port bindings.
+x-api-build: &api-build
+  context: .
+  dockerfile: Dockerfile.api
+
+services:
+  postgres:
+    networks:
+      - edge
+      - data
+    ports:
+      - "127.0.0.1:55432:5432"
+
+  qdrant:
+    environment:
+      QDRANT__SERVICE__API_KEY: raise-qdrant-local-only-32-characters
+    networks:
+      - edge
+      - data
+    ports:
+      - "127.0.0.1:6433:6333"
+
+  api:
+    build: *api-build
+    pull_policy: never
+    environment:
+      APP_ENV: development
+      APP_PUBLIC_URL: http://localhost:3000
+      WEB_AUTH_MODE: disabled
+      APP_SESSION_SECRET: local-development-session-secret
+      STORAGE_BACKEND: local
+      RAG_BACKEND: ${RAG_BACKEND:-qdrant}
+      QDRANT_API_KEY: raise-qdrant-local-only-32-characters
+      RAG_LOCAL_EMBEDDING_MODEL: ${RAG_LOCAL_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      RAG_LOCAL_EMBEDDING_DIMENSIONS: ${RAG_LOCAL_EMBEDDING_DIMENSIONS:-384}
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      WHATSAPP_ENABLED: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./reports/generated:/app/reports/generated
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_LOCAL_AUTH: "true"
+    pull_policy: never
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  bootstrap:
+    build: *api-build
+    pull_policy: never
+    environment:
+      APP_ENV: development
+      WEB_AUTH_MODE: disabled
+      STORAGE_BACKEND: local
+      RAG_BACKEND: qdrant
+      QDRANT_API_KEY: raise-qdrant-local-only-32-characters
+
+  migrate:
+    build: *api-build
+    pull_policy: never
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    pull_policy: never

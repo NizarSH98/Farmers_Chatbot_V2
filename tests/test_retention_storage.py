@@ -1,7 +1,7 @@
 import pytest
+from conftest import new_pilot_store
 
 from farmers_chatbot.auth import UserIdentity
-from farmers_chatbot.pilot_store import PilotStore
 from farmers_chatbot.retention import purge_expired_content
 
 
@@ -13,7 +13,7 @@ class _FailingStorage:
 
 
 def test_retention_keeps_database_record_if_private_delete_fails(tmp_path):
-    store = PilotStore(sqlite_path=tmp_path / "pilot.sqlite3")
+    store = new_pilot_store()
     user = store.upsert_user(
         UserIdentity(
             user_id="",
@@ -34,7 +34,7 @@ def test_retention_keeps_database_record_if_private_delete_fails(tmp_path):
     )
     with store._connect() as connection:
         connection.execute(
-            "UPDATE messages SET created_at = ? WHERE conversation_id = ?",
+            "UPDATE messages SET created_at = %s WHERE conversation_id = %s",
             ("2020-01-01T00:00:00+00:00", conversation_id),
         )
 

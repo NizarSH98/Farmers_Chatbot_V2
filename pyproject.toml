@@ -1,2 +1,6 @@
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+cache_dir = "reports/generated/pytest-cache"
+markers = [
+    "arabic: exercises Arabic, Lebanese Arabic, Arabizi, or code-switched input",
+]

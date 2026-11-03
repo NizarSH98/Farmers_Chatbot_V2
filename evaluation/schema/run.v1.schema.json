@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "raise.eval.run.v1",
+  "title": "RAISE annotated run record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "case_id", "system_id", "retrieved_evidence_ids",
+    "graph_paths", "citations", "escalated", "critical_violation",
+    "unsafe_actions", "quality_score", "success", "cost_usd", "ttft_ms",
+    "end_to_end_ms"
+  ],
+  "properties": {
+    "schema_version": {"const": "raise.eval.run.v1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "system_id": {"type": "string", "minLength": 1},
+    "retrieved_evidence_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "graph_paths": {
+      "type": "array",
+      "items": {
+        "type": "array", "minItems": 2,
+        "items": {"type": "string", "minLength": 1}
+      }
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id", "evidence_id", "entails"],
+        "properties": {
+          "claim_id": {"type": "string", "minLength": 1},
+          "evidence_id": {"type": "string", "minLength": 1},
+          "entails": {"type": "boolean"}
+        }
+      }
+    },
+    "escalated": {"type": "boolean"},
+    "critical_violation": {"type": "boolean"},
+    "unsafe_actions": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "success": {"type": "boolean"},
+    "cost_usd": {"type": ["number", "null"], "minimum": 0},
+    "ttft_ms": {"type": ["number", "null"], "minimum": 0},
+    "end_to_end_ms": {"type": ["number", "null"], "minimum": 0}
+  }
+}

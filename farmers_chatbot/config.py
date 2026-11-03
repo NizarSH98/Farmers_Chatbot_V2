@@ -40,35 +40,56 @@ class ModelOption:
     label: str
     description: str
     supports_images: bool
+    # Provider capability, used to size requests instead of guessing. context
+    # is the total window; max_output is the largest completion the provider
+    # will return.
+    context_tokens: int = 128_000
+    max_output_tokens: int = 4_096
 
 
 MODEL_CATALOG: dict[str, ModelOption] = {
+    "openai/gpt-5.6-luna": ModelOption(
+        id="openai/gpt-5.6-luna",
+        label="GPT-5.6 Luna",
+        description=(
+            "Fast, low-cost default with strong reasoning and image support."
+        ),
+        supports_images=True,
+        context_tokens=1_050_000,
+        max_output_tokens=128_000,
+    ),
     "moonshotai/kimi-k3": ModelOption(
         id="moonshotai/kimi-k3",
         label="Kimi K3",
-        description="Strong multimodal reasoning model; the default for accuracy.",
+        description="Highest-accuracy multimodal model for difficult questions.",
         supports_images=True,
+        context_tokens=1_048_576,
+        max_output_tokens=32_000,
     ),
     "xiaomi/mimo-v2.5": ModelOption(
         id="xiaomi/mimo-v2.5",
         label="MiMo V2.5",
         description="Efficient multimodal model for routine and visual questions.",
         supports_images=True,
+        context_tokens=1_050_000,
+        max_output_tokens=131_072,
     ),
     "minimax/minimax-m3": ModelOption(
         id="minimax/minimax-m3",
         label="MiniMax M3",
         description="Balanced multimodal model for analysis and artifacts.",
         supports_images=True,
+        context_tokens=1_048_576,
+        max_output_tokens=512_000,
     ),
 }
 
 
 DEFAULT_FAST_MODEL = os.getenv(
-    "OPENROUTER_FAST_MODEL", "moonshotai/kimi-k3"
+    "OPENROUTER_FAST_MODEL", "openai/gpt-5.6-luna"
 )
 DEFAULT_DEEP_MODEL = os.getenv(
-    "OPENROUTER_DEEP_MODEL", "moonshotai/kimi-k3"
+    "OPENROUTER_DEEP_MODEL", "openai/gpt-5.6-luna"
 )
 _configured_allowed_models = tuple(
     model.strip()
@@ -84,6 +105,40 @@ OPENROUTER_ALLOWED_MODELS = tuple(
 OPENROUTER_DEFAULT_MODEL = os.getenv(
     "OPENROUTER_DEFAULT_MODEL", DEFAULT_FAST_MODEL
 ).strip()
+
+
+def model_capability(model_id: str) -> ModelOption:
+    """Capability record for a model, falling back to conservative limits."""
+
+    return MODEL_CATALOG.get(model_id) or ModelOption(
+        id=model_id,
+        label=model_id,
+        description="",
+        supports_images=False,
+    )
+
+
+def resolve_max_tokens(mode_max_tokens: int, model_id: str) -> int:
+    """Size a completion to the mode's need and the model's real ceiling.
+
+    The mode value is a target, not a hard cap. A model that can return far more
+    should not be limited to a constant chosen for a smaller generation, and a
+    model that returns less must not be asked for more than it can deliver.
+    """
+
+    capability = model_capability(model_id)
+    return max(256, min(int(mode_max_tokens), capability.max_output_tokens))
+
+
+def resolve_history_budget(model_id: str) -> tuple[int, int]:
+    """Return (turns kept, characters per turn) scaled to the context window."""
+
+    context = model_capability(model_id).context_tokens
+    if context >= 500_000:
+        return 24, 16_000
+    if context >= 128_000:
+        return 16, 12_000
+    return 8, 6_000
 
 
 def resolve_model_id(requested: str | None, fallback: str) -> str:
@@ -103,7 +158,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Short answer for routine questions and slower connections.",
         model=DEFAULT_FAST_MODEL,
         top_k=4,
-        max_tokens=700,
+        max_tokens=2_000,
         temperature=0.2,
         reasoning_effort="low",
         allow_general_knowledge=True,
@@ -116,7 +171,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Default balance of local evidence, detail, latency, and cost.",
         model=DEFAULT_FAST_MODEL,
         top_k=6,
-        max_tokens=1200,
+        max_tokens=6_000,
         temperature=0.25,
         reasoning_effort="medium",
         allow_general_knowledge=True,
@@ -129,7 +184,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="More retrieval and reasoning for planning or comparison.",
         model=DEFAULT_DEEP_MODEL,
         top_k=9,
-        max_tokens=2000,
+        max_tokens=16_000,
         temperature=0.2,
         reasoning_effort="high",
         allow_general_knowledge=True,
@@ -142,7 +197,7 @@ MODE_PROFILES: dict[str, ModeProfile] = {
         description="Auditable answer restricted to the reviewed knowledge base.",
         model=DEFAULT_FAST_MODEL,
         top_k=10,
-        max_tokens=1000,
+        max_tokens=4_000,
         temperature=0.0,
         reasoning_effort="low",
         allow_general_knowledge=False,
@@ -163,16 +218,15 @@ OPENROUTER_DATA_COLLECTION = os.getenv(
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
 APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()
-AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
 WEB_AUTH_MODE = os.getenv(
     "WEB_AUTH_MODE",
-    "supabase" if APP_ENV in {"pilot", "production"} else "disabled",
+    "oidc" if APP_ENV in {"pilot", "production"} else "disabled",
 ).lower()
-ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
+ACCESS_POLICY = os.getenv("ACCESS_POLICY", "any_verified_email").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
 ADMIN_EMAILS = _csv_set("ADMIN_EMAILS")
-AGREEMENT_TEXT_VERSION = "project-2026-08-v1"
+AGREEMENT_TEXT_VERSION = "project-2026-09-v2"
 CONSENT_VERSION = os.getenv("CONSENT_VERSION", AGREEMENT_TEXT_VERSION)
 ORGANIZATION_NAME = os.getenv(
     "ORGANIZATION_NAME", "RAISE-ESDU"
@@ -182,24 +236,29 @@ PRIVACY_CONTACT_EMAIL = os.getenv(
     "privacy-contact-not-configured@example.invalid",
 ).strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-LOCAL_PILOT_DB_PATH = Path(os.getenv("LOCAL_PILOT_DB_PATH", "data/pilot.sqlite3"))
 LOCAL_FILE_ROOT = Path(os.getenv("LOCAL_FILE_ROOT", "data/pilot_files"))
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_PUBLISHABLE_KEY = os.getenv(
-    "SUPABASE_PUBLISHABLE_KEY",
-    os.getenv("SUPABASE_ANON_KEY", ""),
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").strip().rstrip("/")
+S3_REGION = os.getenv("S3_REGION", "us-east-1").strip()
+S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "").strip()
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "").strip()
+S3_FORCE_PATH_STYLE = (
+    os.getenv("S3_FORCE_PATH_STYLE", "false").strip().lower() == "true"
 )
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "pilot-files")
+OIDC_ISSUER_URL = os.getenv("OIDC_ISSUER_URL", "").strip().rstrip("/")
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "").strip()
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "").strip()
+OIDC_SCOPES = os.getenv("OIDC_SCOPES", "openid email profile").strip()
+OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "").strip()
+AUTH_POST_LOGIN_REDIRECT_URL = os.getenv(
+    "AUTH_POST_LOGIN_REDIRECT_URL", APP_PUBLIC_URL
+).strip().rstrip("/")
+APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
+AUTH_SESSION_MAX_AGE_SECONDS = int(
+    os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800")
+)
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
-WEB_ALLOWED_ORIGINS = tuple(
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "WEB_ALLOWED_ORIGINS",
-        "http://localhost:3000",
-    ).split(",")
-    if origin.strip()
-)
 DATABASE_POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "1"))
 DATABASE_POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
 AUTH_CACHE_SECONDS = int(os.getenv("AUTH_CACHE_SECONDS", "60"))
@@ -220,7 +279,6 @@ EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 MAX_QUERIES_PER_SESSION = int(os.getenv("MAX_QUERIES_PER_SESSION", "25"))
 MAX_QUERIES_PER_DAY_GLOBAL = int(os.getenv("MAX_QUERIES_PER_DAY_GLOBAL", "300"))
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "3"))
-RUNTIME_DB_PATH = os.getenv("RUNTIME_DB_PATH", "data/runtime.sqlite3")
 
 MAX_QUERIES_PER_USER_DAY = int(os.getenv("MAX_QUERIES_PER_USER_DAY", "30"))
 MAX_PILOT_QUERIES_PER_DAY = int(os.getenv("MAX_PILOT_QUERIES_PER_DAY", "500"))
@@ -236,10 +294,6 @@ MAX_CHAT_IMAGE_BYTES = int(os.getenv("MAX_CHAT_IMAGE_BYTES", str(5 * 1024 * 1024
 
 ENABLE_TRUSTED_WEB_SEARCH = (
     os.getenv("ENABLE_TRUSTED_WEB_SEARCH", "false").lower() == "true"
-)
-TRUSTED_SEARCH_MODEL = os.getenv(
-    "TRUSTED_SEARCH_MODEL",
-    DEFAULT_FAST_MODEL,
 )
 TRUSTED_SEARCH_MAX_RESULTS = int(os.getenv("TRUSTED_SEARCH_MAX_RESULTS", "5"))
 TRUSTED_SEARCH_MAX_CALLS = int(os.getenv("TRUSTED_SEARCH_MAX_CALLS", "2"))

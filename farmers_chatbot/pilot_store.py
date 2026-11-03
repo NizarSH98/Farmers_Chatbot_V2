@@ -1,17 +1,15 @@
-"""Persistent pilot workspace store with SQLite and PostgreSQL backends."""
+"""PostgreSQL workspace, ownership, quota, turn, and feedback persistence."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
-import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from .auth import UserIdentity
@@ -20,7 +18,6 @@ from .config import (
     DATABASE_POOL_MAX_SIZE,
     DATABASE_POOL_MIN_SIZE,
     DATABASE_URL,
-    LOCAL_PILOT_DB_PATH,
     MAX_ARTIFACTS_PER_USER_DAY,
     MAX_DEEP_QUERIES_PER_USER_DAY,
     MAX_PILOT_QUERIES_PER_DAY,
@@ -58,272 +55,75 @@ class WeeklyUsage:
     week_end: str
 
 
+@dataclass(frozen=True)
+class TurnReservation:
+    """Atomic quota/idempotency reservation for one assistant turn."""
+
+    allowed: bool
+    message: str | None
+    turn_id: str | None = None
+    user_message_id: str | None = None
+    existing: bool = False
+    status: str | None = None
+    assistant_message_id: str | None = None
+
+
+class IdempotencyConflict(ValueError):
+    """Raised when a request key is reused with a different normalized payload."""
+
+
+class TurnStateConflict(ValueError):
+    """Raised when a second outcome tries to replace a terminal turn."""
+
+
+_TERMINAL_TURN_STATUSES = {
+    "complete",
+    "awaiting_clarification",
+    "failed",
+    "cancelled",
+    "timed_out",
+    "refused",
+}
+
+
 class PilotStore:
     """Application persistence that fails closed on ownership checks."""
 
-    def __init__(
-        self,
-        database_url: str | None = None,
-        sqlite_path: str | Path | None = None,
-    ) -> None:
-        # Passing a SQLite path is an explicit local-only choice. This prevents
-        # tests and maintenance scripts from silently using a DATABASE_URL that
-        # happens to be present in the developer's environment.
-        if database_url is None:
-            database_url = "" if sqlite_path is not None else DATABASE_URL
-        self.database_url = database_url.strip()
-        self.sqlite_path = Path(sqlite_path or LOCAL_PILOT_DB_PATH)
-        self.is_postgres = self.database_url.startswith(
-            ("postgres://", "postgresql://")
-        )
-        self._pool: Any | None = None
-        if self.is_postgres:
-            try:
-                from psycopg.rows import dict_row
-                from psycopg_pool import ConnectionPool
-            except ImportError as exc:  # pragma: no cover - deployment dependency
-                raise RuntimeError(
-                    "PostgreSQL support requires psycopg and psycopg-pool"
-                ) from exc
-            self._pool = ConnectionPool(
-                conninfo=self.database_url,
-                min_size=max(1, DATABASE_POOL_MIN_SIZE),
-                max_size=max(DATABASE_POOL_MIN_SIZE, DATABASE_POOL_MAX_SIZE),
-                kwargs={"row_factory": dict_row},
-                open=True,
+    def __init__(self, database_url: str | None = None) -> None:
+        self.database_url = (database_url if database_url is not None else DATABASE_URL).strip()
+        if not self.database_url.startswith(("postgres://", "postgresql://")):
+            raise RuntimeError(
+                "PilotStore requires a PostgreSQL DATABASE_URL. The SQLite "
+                "fallback was removed so local and hosted runs share one schema."
             )
-        if not self.is_postgres:
-            self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:  # pragma: no cover - deployment dependency
+            raise RuntimeError(
+                "PostgreSQL support requires psycopg and psycopg-pool"
+            ) from exc
+        self._pool: Any = ConnectionPool(
+            conninfo=self.database_url,
+            min_size=max(1, DATABASE_POOL_MIN_SIZE),
+            max_size=max(DATABASE_POOL_MIN_SIZE, DATABASE_POOL_MAX_SIZE),
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
 
     @contextmanager
     def _connect(self) -> Iterator[Any]:
-        if self.is_postgres:
-            if self._pool is None:  # pragma: no cover - defensive guard
-                raise RuntimeError("PostgreSQL pool is not initialized")
-            with self._pool.connection() as connection:
-                yield connection
-            return
-
-        connection = sqlite3.connect(self.sqlite_path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
+        with self._pool.connection() as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
-
-    def _sql(self, statement: str) -> str:
-        return statement.replace("?", "%s") if self.is_postgres else statement
-
-    def close(self) -> None:
-        if self._pool is not None:
-            self._pool.close()
-
-    def _initialize(self) -> None:
-        if self.is_postgres:
-            migrations = Path(__file__).resolve().parents[1] / "migrations"
-            with self._connect() as connection:
-                for migration in sorted(migrations.glob("*.sql")):
-                    connection.execute(migration.read_text(encoding="utf-8"))
-            return
-
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    issuer TEXT NOT NULL,
-                    subject TEXT NOT NULL,
-                    auth_user_id TEXT,
-                    email TEXT,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    consent_version TEXT,
-                    consent_at TEXT,
-                    default_mode TEXT NOT NULL DEFAULT 'standard',
-                    created_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL,
-                    UNIQUE (issuer, subject)
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id
-                    ON users(auth_user_id);
-                CREATE TABLE IF NOT EXISTS projects (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    name TEXT NOT NULL,
-                    instructions TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
-                    title TEXT NOT NULL,
-                    channel TEXT NOT NULL DEFAULT 'web',
-                    archived INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated
-                    ON conversations(owner_user_id, updated_at);
-                CREATE TABLE IF NOT EXISTS messages (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    language TEXT,
-                    mode TEXT,
-                    model TEXT,
-                    status TEXT NOT NULL DEFAULT 'complete',
-                    citations_json TEXT NOT NULL DEFAULT '[]',
-                    tools_json TEXT NOT NULL DEFAULT '[]',
-                    artifacts_json TEXT NOT NULL DEFAULT '[]',
-                    attachments_json TEXT NOT NULL DEFAULT '[]',
-                    warning TEXT,
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_messages_conversation
-                    ON messages(conversation_id, created_at);
-                CREATE TABLE IF NOT EXISTS documents (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                    filename TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    storage_path TEXT NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    error_message TEXT,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS document_chunks (
-                    id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-                    chunk_index INTEGER NOT NULL,
-                    text_content TEXT NOT NULL,
-                    UNIQUE(document_id, chunk_index)
-                );
-                CREATE TABLE IF NOT EXISTS artifacts (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-                    conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
-                    artifact_type TEXT NOT NULL,
-                    filename TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    storage_path TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL DEFAULT '{}',
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS feedback (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    occurred_at TEXT NOT NULL,
-                    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-                    message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    category TEXT NOT NULL,
-                    rating INTEGER,
-                    comment TEXT NOT NULL,
-                    language TEXT,
-                    consent INTEGER NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'new',
-                    priority TEXT,
-                    release_version TEXT,
-                    verification_note TEXT
-                );
-                CREATE TABLE IF NOT EXISTS query_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    occurred_at TEXT NOT NULL,
-                    day_utc TEXT NOT NULL,
-                    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-                    mode TEXT NOT NULL,
-                    language TEXT,
-                    duration_ms INTEGER,
-                    success INTEGER,
-                    error_type TEXT,
-                    trusted_searches INTEGER NOT NULL DEFAULT 0,
-                    request_id TEXT,
-                    ttft_ms INTEGER,
-                    stage_durations_json TEXT NOT NULL DEFAULT '{}',
-                    prompt_tokens INTEGER,
-                    completion_tokens INTEGER,
-                    estimated_cost_usd REAL
-                );
-                CREATE INDEX IF NOT EXISTS idx_pilot_query_day
-                    ON query_events(day_utc);
-                CREATE INDEX IF NOT EXISTS idx_pilot_query_user
-                    ON query_events(user_id, occurred_at);
-                CREATE TABLE IF NOT EXISTS uploads (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    storage_path TEXT NOT NULL,
-                    mime_type TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'ready',
-                    created_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_uploads_owner_created
-                    ON uploads(owner_user_id, created_at);
-                CREATE TABLE IF NOT EXISTS assistant_turns (
-                    id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
-                    status TEXT NOT NULL,
-                    clarification_count INTEGER NOT NULL DEFAULT 0,
-                    analysis_json TEXT NOT NULL DEFAULT '{}',
-                    error_type TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_assistant_turns_conversation
-                    ON assistant_turns(conversation_id, created_at);
-                CREATE TABLE IF NOT EXISTS whatsapp_events (
-                    message_id TEXT PRIMARY KEY,
-                    identity_hash TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    error_type TEXT,
-                    received_at TEXT NOT NULL,
-                    completed_at TEXT
-                );
-                """
-            )
-            self._ensure_sqlite_upgrades(connection)
 
     @staticmethod
-    def _ensure_sqlite_upgrades(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(users)")
-        }
-        if "auth_user_id" not in columns:
-            connection.execute("ALTER TABLE users ADD COLUMN auth_user_id TEXT")
-            connection.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id "
-                "ON users(auth_user_id)"
-            )
+    def _sql(statement: str) -> str:
+        """Translate the shared `?` placeholder style to psycopg's `%s`."""
 
-        query_columns = {
-            row["name"]
-            for row in connection.execute("PRAGMA table_info(query_events)")
-        }
-        additions = {
-            "request_id": "TEXT",
-            "ttft_ms": "INTEGER",
-            "stage_durations_json": "TEXT NOT NULL DEFAULT '{}'",
-            "prompt_tokens": "INTEGER",
-            "completion_tokens": "INTEGER",
-            "estimated_cost_usd": "REAL",
-        }
-        for name, definition in additions.items():
-            if name not in query_columns:
-                connection.execute(
-                    f"ALTER TABLE query_events ADD COLUMN {name} {definition}"
-                )
+        return statement.replace("?", "%s")
+
+    def close(self) -> None:
+        self._pool.close()
 
     def upsert_user(self, identity: UserIdentity) -> dict[str, Any]:
         now = utc_now()
@@ -368,96 +168,6 @@ class PilotStore:
                     ),
                 )
         return self.get_user(user_id)
-
-    def upsert_supabase_user(
-        self,
-        *,
-        auth_user_id: str,
-        email: str,
-        name: str,
-        google_subject: str | None,
-        is_admin: bool,
-    ) -> dict[str, Any]:
-        """Link a verified Supabase identity without using email as a key."""
-
-        auth_user_id = auth_user_id.strip()
-        if not auth_user_id:
-            raise ValueError("Supabase identity is missing its subject")
-        now = utc_now()
-        role = "admin" if is_admin else "user"
-        with self._connect() as connection:
-            row = connection.execute(
-                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
-                (auth_user_id,),
-            ).fetchone()
-            if not row and google_subject:
-                row = connection.execute(
-                    self._sql(
-                        """
-                        SELECT * FROM users
-                        WHERE issuer IN ('accounts.google.com',
-                                         'https://accounts.google.com')
-                          AND subject = ?
-                        """
-                    ),
-                    (google_subject,),
-                ).fetchone()
-            if row:
-                connection.execute(
-                    self._sql(
-                        """
-                        UPDATE users
-                        SET auth_user_id = ?, email = ?, name = ?, role = ?,
-                            last_seen_at = ?
-                        WHERE id = ?
-                        """
-                    ),
-                    (
-                        auth_user_id,
-                        email or None,
-                        name[:200],
-                        role,
-                        now,
-                        row["id"],
-                    ),
-                )
-                user_id = str(row["id"])
-            else:
-                user_id = str(uuid.uuid4())
-                issuer = "https://accounts.google.com" if google_subject else "supabase"
-                subject = google_subject or auth_user_id
-                connection.execute(
-                    self._sql(
-                        """
-                        INSERT INTO users
-                            (id, issuer, subject, auth_user_id, email, name, role,
-                             created_at, last_seen_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """
-                    ),
-                    (
-                        user_id,
-                        issuer,
-                        subject,
-                        auth_user_id,
-                        email or None,
-                        name[:200],
-                        role,
-                        now,
-                        now,
-                    ),
-                )
-        return self.get_user(user_id)
-
-    def get_user_by_auth_id(self, auth_user_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
-                (auth_user_id,),
-            ).fetchone()
-        if not row:
-            raise ValueError("User not found")
-        return dict(row)
 
     def upsert_whatsapp_user(self, identity_hash: str) -> dict[str, Any]:
         identity = UserIdentity(
@@ -906,6 +616,18 @@ class PilotStore:
             rows = connection.execute(self._sql(query), parameters).fetchall()
         return [dict(row) for row in rows]
 
+    def list_conversation_ids(self, owner_user_id: str) -> list[str]:
+        """Return every owned conversation ID for privacy-state cleanup."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                self._sql(
+                    "SELECT id FROM conversations WHERE owner_user_id = ? ORDER BY id"
+                ),
+                (owner_user_id,),
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def get_conversation(
         self,
         owner_user_id: str,
@@ -1033,6 +755,7 @@ class PilotStore:
         tools: list[str] | None = None,
         artifact_ids: list[str] | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        interaction: dict[str, Any] | None = None,
         warning: str | None = None,
     ) -> str:
         if role not in {"user", "assistant", "system"}:
@@ -1047,8 +770,8 @@ class PilotStore:
                     INSERT INTO messages
                         (id, conversation_id, role, content, language, mode, model,
                          status, citations_json, tools_json, artifacts_json,
-                         attachments_json, warning, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         attachments_json, interaction_json, warning, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 ),
                 (
@@ -1064,6 +787,7 @@ class PilotStore:
                     json.dumps(tools or [], ensure_ascii=False),
                     json.dumps(artifact_ids or [], ensure_ascii=False),
                     json.dumps(attachments or [], ensure_ascii=False),
+                    json.dumps(interaction or {}, ensure_ascii=False),
                     warning,
                     now,
                 ),
@@ -1123,6 +847,12 @@ class PilotStore:
                 ("attachments_json", "attachments"),
             ):
                 item[target] = json.loads(item.pop(source) or "[]")
+            interaction = item.pop("interaction_json") or {}
+            item["interaction"] = (
+                interaction
+                if isinstance(interaction, dict)
+                else json.loads(interaction)
+            )
             messages.append(item)
         return messages
 
@@ -1224,6 +954,341 @@ class PilotStore:
             )
         return turn_id
 
+    def reserve_assistant_turn(
+        self,
+        owner_user_id: str,
+        conversation_id: str,
+        *,
+        request_id: str,
+        payload_sha256: str,
+        channel: str,
+        mode: str,
+        language: str,
+        user_content: str,
+        attachments: list[dict[str, Any]] | None,
+        clarification_count: int,
+        reserved_cost_usd: float,
+    ) -> TurnReservation:
+        """Reserve quota/cost and create the user message + turn exactly once."""
+
+        with self._connect() as connection:
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                ("raise:turn-reservations",),
+            )
+
+            # Capture quota/cooldown time only after the serialization lock. A
+            # timestamp captured before waiting can be older than the preceding
+            # reservation and incorrectly fail even a zero-second cooldown.
+            now = datetime.now(UTC)
+            now_iso = now.isoformat()
+            day = now.date().isoformat()
+            week_start, week_end = _week_bounds(now)
+
+            existing = connection.execute(
+                self._sql(
+                    """
+                    SELECT id, user_message_id, assistant_message_id, status,
+                           payload_sha256
+                    FROM assistant_turns
+                    WHERE owner_user_id = ? AND request_id = ?
+                    """
+                ),
+                (owner_user_id, request_id),
+            ).fetchone()
+            if existing:
+                if str(existing["payload_sha256"] or "") != payload_sha256:
+                    raise IdempotencyConflict(
+                        "Idempotency-Key was already used with a different payload"
+                    )
+                return TurnReservation(
+                    allowed=True,
+                    message=None,
+                    turn_id=str(existing["id"]),
+                    user_message_id=str(existing["user_message_id"]),
+                    existing=True,
+                    status=str(existing["status"]),
+                    assistant_message_id=(
+                        str(existing["assistant_message_id"])
+                        if existing["assistant_message_id"]
+                        else None
+                    ),
+                )
+
+            conversation = connection.execute(
+                self._sql(
+                    """
+                    SELECT id FROM conversations
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (conversation_id, owner_user_id),
+            ).fetchone()
+            if not conversation:
+                raise ValueError("Conversation not found")
+
+            counts = connection.execute(
+                self._sql(
+                    """
+                    SELECT
+                        SUM(CASE WHEN user_id = ? AND day_utc = ? THEN 1 ELSE 0 END)
+                            AS user_count,
+                        SUM(CASE WHEN day_utc = ? THEN 1 ELSE 0 END)
+                            AS global_count,
+                        SUM(CASE WHEN user_id = ? AND day_utc = ? AND mode = 'deep'
+                                 THEN 1 ELSE 0 END) AS deep_count
+                    FROM query_events
+                    """
+                ),
+                (owner_user_id, day, day, owner_user_id, day),
+            ).fetchone()
+            user_count = int(counts["user_count"] or 0)
+            global_count = int(counts["global_count"] or 0)
+            deep_count = int(counts["deep_count"] or 0)
+            if user_count >= MAX_QUERIES_PER_USER_DAY:
+                return TurnReservation(False, "Daily user query limit reached.")
+            if global_count >= MAX_PILOT_QUERIES_PER_DAY:
+                return TurnReservation(False, "Daily pilot limit reached.")
+            if mode == "deep" and deep_count >= MAX_DEEP_QUERIES_PER_USER_DAY:
+                return TurnReservation(False, "Daily Deep-mode limit reached.")
+
+            weekly = connection.execute(
+                self._sql(
+                    """
+                    SELECT COALESCE(SUM(
+                        CASE WHEN query_status = 'reserved'
+                             THEN reserved_cost_usd
+                             ELSE COALESCE(estimated_cost_usd, reserved_cost_usd, 0)
+                        END
+                    ), 0) AS spend
+                    FROM query_events
+                    WHERE user_id = ? AND occurred_at >= ? AND occurred_at < ?
+                    """
+                ),
+                (owner_user_id, week_start, week_end),
+            ).fetchone()
+            if float(weekly["spend"] or 0) + max(0.0, reserved_cost_usd) > (
+                MAX_USER_WEEKLY_COST_USD
+            ):
+                return TurnReservation(False, "Weekly spending limit reached.")
+
+            last = connection.execute(
+                self._sql(
+                    """
+                    SELECT occurred_at FROM query_events
+                    WHERE user_id = ? ORDER BY occurred_at DESC LIMIT 1
+                    """
+                ),
+                (owner_user_id,),
+            ).fetchone()
+            if last:
+                elapsed = (
+                    now - datetime.fromisoformat(str(last["occurred_at"]))
+                ).total_seconds()
+                if elapsed < PILOT_COOLDOWN_SECONDS:
+                    return TurnReservation(
+                        False, "Please wait briefly before another query."
+                    )
+
+            user_message_id = str(uuid.uuid4())
+            turn_id = str(uuid.uuid4())
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO messages
+                        (id, conversation_id, role, content, language, status,
+                         citations_json, tools_json, artifacts_json,
+                         attachments_json, created_at)
+                    VALUES (?, ?, 'user', ?, ?, 'complete', '[]', '[]', '[]', ?, ?)
+                    """
+                ),
+                (
+                    user_message_id,
+                    conversation_id,
+                    user_content[:100000],
+                    language,
+                    json.dumps(attachments or [], ensure_ascii=False),
+                    now_iso,
+                ),
+            )
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO assistant_turns
+                        (id, owner_user_id, conversation_id, user_message_id,
+                         status, clarification_count, request_id, payload_sha256,
+                         channel, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'analyzing', ?, ?, ?, ?, ?, ?)
+                    """
+                ),
+                (
+                    turn_id,
+                    owner_user_id,
+                    conversation_id,
+                    user_message_id,
+                    max(0, int(clarification_count)),
+                    request_id,
+                    payload_sha256,
+                    channel,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO query_events
+                        (occurred_at, day_utc, user_id, mode, language, request_id,
+                         turn_id, payload_sha256, query_status, reserved_cost_usd)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?)
+                    """
+                ),
+                (
+                    now_iso,
+                    day,
+                    owner_user_id,
+                    mode,
+                    language,
+                    request_id,
+                    turn_id,
+                    payload_sha256,
+                    max(0.0, float(reserved_cost_usd)),
+                ),
+            )
+            connection.execute(
+                self._sql("UPDATE conversations SET updated_at = ? WHERE id = ?"),
+                (now_iso, conversation_id),
+            )
+        return TurnReservation(
+            allowed=True,
+            message=None,
+            turn_id=turn_id,
+            user_message_id=user_message_id,
+        )
+
+    def find_assistant_turn_by_request(
+        self,
+        owner_user_id: str,
+        request_id: str,
+        payload_sha256: str,
+    ) -> TurnReservation | None:
+        """Find an idempotent replay before consumed attachments are resolved."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT id, user_message_id, assistant_message_id, status,
+                           payload_sha256
+                    FROM assistant_turns
+                    WHERE owner_user_id = ? AND request_id = ?
+                    """
+                ),
+                (owner_user_id, request_id),
+            ).fetchone()
+        if not row:
+            return None
+        if str(row["payload_sha256"] or "") != payload_sha256:
+            raise IdempotencyConflict(
+                "Idempotency-Key was already used with a different payload"
+            )
+        return TurnReservation(
+            allowed=True,
+            message=None,
+            turn_id=str(row["id"]),
+            user_message_id=str(row["user_message_id"]),
+            existing=True,
+            status=str(row["status"]),
+            assistant_message_id=(
+                str(row["assistant_message_id"])
+                if row["assistant_message_id"]
+                else None
+            ),
+        )
+
+    def get_assistant_turn(self, owner_user_id: str, turn_id: str) -> dict[str, Any]:
+        """Return owner-filtered persisted turn state for stream recovery."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT t.*, m.role AS message_role, m.content AS message_content,
+                           m.language AS message_language, m.mode AS message_mode,
+                           m.model AS message_model, m.status AS message_status,
+                           m.citations_json, m.tools_json, m.artifacts_json,
+                           m.attachments_json, m.warning AS message_warning,
+                           m.interaction_json,
+                           m.created_at AS message_created_at
+                    FROM assistant_turns t
+                    LEFT JOIN messages m ON m.id = t.assistant_message_id
+                    WHERE t.id = ? AND t.owner_user_id = ?
+                    """
+                ),
+                (turn_id, owner_user_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Assistant turn not found")
+        item = dict(row)
+        message = None
+        if item.get("assistant_message_id"):
+            message = {
+                "id": item["assistant_message_id"],
+                "role": item.get("message_role") or "assistant",
+                "content": item.get("message_content") or "",
+                "language": item.get("message_language"),
+                "mode": item.get("message_mode"),
+                "model": item.get("message_model"),
+                "status": item.get("message_status") or item["status"],
+                "citations": json.loads(item.get("citations_json") or "[]"),
+                "tools": json.loads(item.get("tools_json") or "[]"),
+                "artifact_ids": json.loads(item.get("artifacts_json") or "[]"),
+                "attachments": json.loads(item.get("attachments_json") or "[]"),
+                "interaction": (
+                    item.get("interaction_json")
+                    if isinstance(item.get("interaction_json"), dict)
+                    else json.loads(item.get("interaction_json") or "{}")
+                ),
+                "warning": item.get("message_warning"),
+                "created_at": item.get("message_created_at"),
+            }
+        return {
+            "turn_id": item["id"],
+            "request_id": item.get("request_id"),
+            "status": item["status"],
+            "error_type": item.get("error_type"),
+            "terminal_sequence": item.get("terminal_sequence"),
+            "message": message,
+        }
+
+    def get_assistant_turn_by_request_id(
+        self,
+        owner_user_id: str,
+        request_id: str,
+    ) -> dict[str, Any] | None:
+        """Return persisted state for trusted delivery retry adapters.
+
+        Unlike ``find_assistant_turn_by_request``, this lookup deliberately does
+        not accept a payload hash: it can only recover an already-created turn
+        owned by the authenticated/internal actor. This lets a channel resend a
+        persisted answer even when mutable user preferences changed after the
+        original request, without ever starting another provider run.
+        """
+
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT id FROM assistant_turns
+                    WHERE owner_user_id = ? AND request_id = ?
+                    """
+                ),
+                (owner_user_id, request_id),
+            ).fetchone()
+        if not row:
+            return None
+        return self.get_assistant_turn(owner_user_id, str(row["id"]))
+
     def complete_assistant_turn(
         self,
         owner_user_id: str,
@@ -1256,6 +1321,252 @@ class PilotStore:
             )
             if cursor.rowcount != 1:
                 raise ValueError("Assistant turn not found")
+
+    def finalize_assistant_turn(
+        self,
+        owner_user_id: str,
+        turn_id: str,
+        *,
+        turn_status: str,
+        message_content: str,
+        message_language: str,
+        message_mode: str,
+        message_model: str | None,
+        message_status: str,
+        citations: list[dict[str, Any]],
+        tools: list[str],
+        artifact_ids: list[str],
+        warning: str | None,
+        analysis: dict[str, Any],
+        duration_ms: int,
+        success: bool,
+        error_type: str | None,
+        trusted_searches: int,
+        ttft_ms: int | None,
+        stage_durations: dict[str, int],
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        estimated_cost_usd: float | None,
+        provider_calls: list[dict[str, Any]],
+        terminal_sequence: int,
+        interaction: dict[str, Any] | None = None,
+    ) -> str:
+        """Persist one terminal message, exact query accounting, and provider calls."""
+
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"raise:turn:{turn_id}",),
+            )
+            turn = connection.execute(
+                self._sql(
+                    """
+                    SELECT conversation_id, request_id, assistant_message_id, status
+                    FROM assistant_turns
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (turn_id, owner_user_id),
+            ).fetchone()
+            if not turn:
+                raise ValueError("Assistant turn not found")
+            if turn["assistant_message_id"]:
+                return str(turn["assistant_message_id"])
+            if str(turn["status"]) in _TERMINAL_TURN_STATUSES:
+                raise TurnStateConflict(
+                    "Assistant turn already reached a terminal state"
+                )
+
+            message_id = str(uuid.uuid4())
+            connection.execute(
+                self._sql(
+                    """
+                    INSERT INTO messages
+                        (id, conversation_id, role, content, language, mode, model,
+                         status, citations_json, tools_json, artifacts_json,
+                         attachments_json, interaction_json, warning, created_at)
+                    VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)
+                    """
+                ),
+                (
+                    message_id,
+                    turn["conversation_id"],
+                    message_content[:100000],
+                    message_language,
+                    message_mode,
+                    message_model,
+                    message_status,
+                    json.dumps(citations, ensure_ascii=False),
+                    json.dumps(tools, ensure_ascii=False),
+                    json.dumps(artifact_ids, ensure_ascii=False),
+                    json.dumps(interaction or {}, ensure_ascii=False),
+                    warning,
+                    now,
+                ),
+            )
+            connection.execute(
+                self._sql(
+                    """
+                    UPDATE assistant_turns
+                    SET status = ?, analysis_json = ?, assistant_message_id = ?,
+                        error_type = ?, terminal_sequence = ?, updated_at = ?
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (
+                    turn_status,
+                    json.dumps(analysis, ensure_ascii=False),
+                    message_id,
+                    error_type,
+                    int(terminal_sequence),
+                    now,
+                    turn_id,
+                    owner_user_id,
+                ),
+            )
+            connection.execute(
+                self._sql(
+                    """
+                    UPDATE query_events
+                    SET language = ?, duration_ms = ?, success = ?, error_type = ?,
+                        trusted_searches = ?, ttft_ms = ?, stage_durations_json = ?,
+                        prompt_tokens = ?, completion_tokens = ?,
+                        estimated_cost_usd = ?, query_status = ?, finalized_at = ?
+                    WHERE turn_id = ? AND user_id = ? AND query_status = 'reserved'
+                    """
+                ),
+                (
+                    message_language,
+                    int(duration_ms),
+                    int(success),
+                    error_type,
+                    int(trusted_searches),
+                    int(ttft_ms) if ttft_ms is not None else None,
+                    json.dumps(stage_durations, sort_keys=True),
+                    int(prompt_tokens) if prompt_tokens is not None else None,
+                    int(completion_tokens) if completion_tokens is not None else None,
+                    (
+                        float(estimated_cost_usd)
+                        if estimated_cost_usd is not None
+                        else None
+                    ),
+                    "completed" if success else "failed",
+                    now,
+                    turn_id,
+                    owner_user_id,
+                ),
+            )
+            for sequence, record in enumerate(provider_calls):
+                usage = record.get("usage") or {}
+                connection.execute(
+                    self._sql(
+                        """
+                        INSERT INTO provider_calls
+                            (id, turn_id, request_id, sequence, stage, model,
+                             duration_ms, outcome, prompt_tokens, completion_tokens,
+                             cost_usd, error_type, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """
+                    ),
+                    (
+                        str(uuid.uuid4()),
+                        turn_id,
+                        turn["request_id"],
+                        sequence,
+                        str(record.get("stage") or "unknown"),
+                        str(record.get("model") or "unknown"),
+                        int(record.get("duration_ms") or 0),
+                        str(record.get("outcome") or "unknown"),
+                        usage.get("prompt_tokens"),
+                        usage.get("completion_tokens"),
+                        usage.get("cost_usd"),
+                        record.get("error_type"),
+                        now,
+                    ),
+                )
+            connection.execute(
+                self._sql("UPDATE conversations SET updated_at = ? WHERE id = ?"),
+                (now, turn["conversation_id"]),
+            )
+        return message_id
+
+    def fail_reserved_turn(
+        self,
+        owner_user_id: str,
+        turn_id: str,
+        *,
+        status: str,
+        error_type: str,
+        duration_ms: int,
+        terminal_sequence: int,
+    ) -> None:
+        """Finalize a reserved turn without creating an unsupported answer."""
+
+        if status not in _TERMINAL_TURN_STATUSES:
+            raise ValueError("Turn failure status must be terminal")
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"raise:turn:{turn_id}",),
+            )
+            turn = connection.execute(
+                self._sql(
+                    """
+                    SELECT status FROM assistant_turns
+                    WHERE id = ? AND owner_user_id = ?
+                    """
+                ),
+                (turn_id, owner_user_id),
+            ).fetchone()
+            if not turn:
+                raise ValueError("Assistant turn not found")
+            if str(turn["status"]) in _TERMINAL_TURN_STATUSES:
+                return
+            cursor = connection.execute(
+                self._sql(
+                    """
+                    UPDATE assistant_turns
+                    SET status = ?, error_type = ?, terminal_sequence = ?, updated_at = ?
+                    WHERE id = ? AND owner_user_id = ?
+                      AND status NOT IN (
+                          'complete', 'awaiting_clarification', 'failed',
+                          'cancelled', 'timed_out', 'refused'
+                      )
+                    """
+                ),
+                (
+                    status,
+                    error_type,
+                    int(terminal_sequence),
+                    now,
+                    turn_id,
+                    owner_user_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TurnStateConflict(
+                    "Assistant turn changed while recording its terminal state"
+                )
+            connection.execute(
+                self._sql(
+                    """
+                    UPDATE query_events
+                    SET duration_ms = ?, success = 0, error_type = ?,
+                        query_status = ?, finalized_at = ?
+                    WHERE turn_id = ? AND user_id = ? AND query_status = 'reserved'
+                    """
+                ),
+                (
+                    int(duration_ms),
+                    error_type,
+                    status,
+                    now,
+                    turn_id,
+                    owner_user_id,
+                ),
+            )
 
     def consecutive_clarifications(
         self,
@@ -1459,6 +1770,17 @@ class PilotStore:
         item = dict(row)
         item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
         return item
+
+    def delete_artifact(self, owner_user_id: str, artifact_id: str) -> str:
+        artifact = self.get_artifact(owner_user_id, artifact_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                self._sql("DELETE FROM artifacts WHERE id = ? AND owner_user_id = ?"),
+                (artifact_id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Artifact not found")
+        return str(artifact["storage_path"])
 
     def list_artifacts(
         self,
@@ -1714,7 +2036,7 @@ class PilotStore:
             raise ValueError("Unknown feedback category")
         del session_id
         with self._connect() as connection:
-            cursor = connection.execute(
+            connection.execute(
                 self._sql(
                     """
                     INSERT INTO feedback
@@ -1734,10 +2056,59 @@ class PilotStore:
                     1,
                 ),
             )
-            if self.is_postgres:
-                row = connection.execute("SELECT LASTVAL() AS id").fetchone()
-                return int(row["id"])
-            return int(cursor.lastrowid)
+            row = connection.execute("SELECT LASTVAL() AS id").fetchone()
+            return int(row["id"])
+
+    def list_feedback(self, status: str | None = None) -> list[dict[str, Any]]:
+        query = (
+            "SELECT id, occurred_at, category, rating, comment, language, "
+            "status, priority, release_version, verification_note FROM feedback"
+        )
+        parameters: tuple[Any, ...] = ()
+        if status:
+            query += " WHERE status = %s"
+            parameters = (status,)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_feedback(
+        self,
+        feedback_id: int,
+        *,
+        status: str,
+        priority: str | None = None,
+        release_version: str | None = None,
+        verification_note: str | None = None,
+    ) -> None:
+        allowed_statuses = {
+            "new",
+            "validated",
+            "planned",
+            "resolved",
+            "verified",
+            "rejected",
+        }
+        if status not in allowed_statuses:
+            raise ValueError("Unknown feedback status")
+        if priority not in {None, "low", "medium", "high"}:
+            raise ValueError("Priority must be low, medium, or high")
+        note = " ".join((verification_note or "").split()).strip() or None
+        if note and len(note) > 2000:
+            raise ValueError("Verification note must be 2000 characters or fewer")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE feedback
+                SET status = %s, priority = %s, release_version = %s,
+                    verification_note = %s
+                WHERE id = %s
+                """,
+                (status, priority, release_version, note, int(feedback_id)),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Feedback record not found")
 
     def feedback_summary(self) -> dict[str, Any]:
         with self._connect() as connection:
@@ -1821,6 +2192,22 @@ class PilotStore:
             if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
                 return False
             raise
+
+    def get_whatsapp_event(self, message_id: str) -> dict[str, Any] | None:
+        """Return delivery state without exposing the external phone number."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                self._sql(
+                    """
+                    SELECT message_id, identity_hash, status, error_type,
+                           received_at, completed_at
+                    FROM whatsapp_events WHERE message_id = ?
+                    """
+                ),
+                (message_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def complete_whatsapp_event(
         self,

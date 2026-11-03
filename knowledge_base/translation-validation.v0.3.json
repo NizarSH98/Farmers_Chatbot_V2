@@ -1,0 +1,44 @@
+{
+  "arabic_path": "knowledge_base/agrifood_knowledge_v0.3.ar.md",
+  "arabic_sha256": "1e70cdeeedc415d04285a03be7a4f0a97849af970ac7e1de6b95ceeea3a20623",
+  "embedding": {
+    "cache_dir": "model-cache",
+    "dimensions": 384,
+    "model": "intfloat/multilingual-e5-small"
+  },
+  "english_path": "knowledge_base/agrifood_knowledge_v0.3.en.md",
+  "english_sha256": "16b1ac718dfb8c96c6c6a665b824f438b7717a1a4fd0babe186068b4939eedff",
+  "failed": 0,
+  "failed_record_ids": [],
+  "metrics": {
+    "aligned_median": 0.883452,
+    "aligned_min": 0.785055,
+    "aligned_p05": 0.841879,
+    "corpus_gate_passed": true,
+    "median_margin": 0.099164,
+    "negative_median": 0.784288
+  },
+  "passed": 18,
+  "qwen_advisory": {
+    "available": true,
+    "contradictory_decisions": 61,
+    "decisions": 88,
+    "gating": false,
+    "path": "build-reports/translation-validation.qwen-advisory.v0.3.json",
+    "reason": "The local 4B judge repeatedly reports a passage as faithful while also claiming a material omission, including text visibly present in the aligned Arabic unit.",
+    "sha256": "a079c78c870dbae67a56bd06c6af1b9c2aabb2cdb85907e310285b962b4cd6c7"
+  },
+  "records": 18,
+  "report_sha256": "2bb39c02072381877139a2497919efea05cf00bbf1cadbfc6abc9639e50c7cad",
+  "schema_version": "raise-translation-validation-v4-local-semantic",
+  "semantic_failures": [],
+  "structural_failures": [],
+  "thresholds": {
+    "minimum_corpus_median": 0.78,
+    "minimum_corpus_negative_margin": 0.08,
+    "minimum_unit_similarity": 0.78
+  },
+  "translation_asset_path": "knowledge_base/agrifood_translations_v0.3.json",
+  "translation_asset_sha256": "b7926d166384f905eff8760d2f04870f73b59e119c63a7ce57494bf89dcf106a",
+  "validation_units": 429
+}
