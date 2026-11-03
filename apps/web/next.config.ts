@@ -19,7 +19,11 @@ const nextConfig: NextConfig = {
           key: "Content-Security-Policy",
           value: [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",
+            // React uses eval() only in development for debugging call stacks;
+            // production keeps the stricter policy.
+            process.env.NODE_ENV === "development"
+              ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+              : "script-src 'self' 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "connect-src 'self'",
