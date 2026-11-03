@@ -35,6 +35,17 @@ def test_unknown_internal_tags_are_removed_not_shown():
     assert result == "Check the field  weekly."
 
 
+def test_corpus_source_codes_are_removed_not_shown():
+    renderer = CitationRenderer((CHUNK,))
+
+    result = renderer.rewrite(
+        "This window is general guidance [RAISE-AGRIFOOD-APPROVED-V0.3], not a fixed date."
+    )
+
+    assert "RAISE-AGRIFOOD" not in result
+    assert result == "This window is general guidance, not a fixed date."
+
+
 def test_ordinary_brackets_survive():
     renderer = CitationRenderer((CHUNK,))
 

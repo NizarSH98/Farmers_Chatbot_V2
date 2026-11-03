@@ -148,8 +148,13 @@ Client-supplied model IDs always go through `resolve_model_id()` against
 
 Next.js App Router + React 19. The browser uses the same-origin `/api` proxy;
 `lib/api.ts` wraps the backend with SSE streaming and CSRF/session handling.
-`components/ChatWorkspace.tsx` is the main UI and its largest maintenance
-hotspot.
+The chat UI is built on assistant-ui (`ExternalStoreRuntime`) with shadcn/ui and
+Tailwind v4. Our code lives in `components/raise/`: `chat-runtime.tsx` adapts
+the turn stream, conversations, attachments, feedback, dictation, and read-aloud
+to the runtime; `convert.ts` maps messages to parts; `message-parts.tsx`
+renders progress, clarification cards, grouped sources, and artifacts.
+`components/assistant-ui/` and `components/ui/` are vendored registry code kept
+close to upstream (strict React Compiler lint rules are scoped off there only).
 
 ## Working agreements
 

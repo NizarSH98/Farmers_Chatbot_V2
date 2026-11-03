@@ -70,38 +70,64 @@ def test_choices_must_match_the_users_writing_system() -> None:
         StructuredRequestAnalysis.model_validate(value, context={"language": "arabic"})
 
 
-@pytest.mark.asyncio
-async def test_workflow_resumes_and_stops_after_three_rounds() -> None:
-    calls: list[str] = []
-
+def _always_unclear_planner(calls: list[str]):
     async def planner(state: dict[str, Any]) -> StructuredRequestAnalysis:
         calls.append(str(state["effective_text"]))
         return StructuredRequestAnalysis.model_validate(
             analysis_data(needs=True), context={"language": "english"}
         )
 
-    workflow = ClarificationWorkflow("", planner)
-    common = {
+    return planner
+
+
+def _common(style: str) -> dict[str, Any]:
+    return {
         "actor_id": "user-1",
-        "conversation_id": "conversation-1",
+        "conversation_id": f"conversation-{style}",
         "language": "english",
         "mode": "standard",
-        "clarification_style": "auto",
+        "clarification_style": style,
         "history": [],
     }
+
+
+@pytest.mark.asyncio
+async def test_default_style_asks_once_then_answers_with_the_details() -> None:
+    calls: list[str] = []
+    workflow = ClarificationWorkflow("", _always_unclear_planner(calls))
+    first = await workflow.advance(text="Help with my farm", **_common("auto"))
+    final = await workflow.advance(text="Potato", **_common("auto"))
+    assert first.pending and first.interaction["round"] == 1
+    assert first.interaction["max_rounds"] == 1
+    assert not final.pending
+    assert "Potato" in final.effective_text
+    assert "Answered with the details provided." in final.analysis["assumptions"]
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_guided_style_narrows_for_up_to_three_rounds() -> None:
+    calls: list[str] = []
+    workflow = ClarificationWorkflow("", _always_unclear_planner(calls))
+    common = _common("guided")
     first = await workflow.advance(text="Help with my farm", **common)
     second = await workflow.advance(text="Potato", **common)
     third = await workflow.advance(text="Akkar", **common)
     final = await workflow.advance(text="Two hectares", **common)
-    assert first.pending and first.interaction["round"] == 1
-    assert second.pending and second.interaction["round"] == 2
-    assert third.pending and third.interaction["round"] == 3
+    assert [first.interaction["round"], second.interaction["round"], third.interaction["round"]] == [1, 2, 3]
     assert not final.pending
     assert all(
         value in final.effective_text for value in ("Potato", "Akkar", "Two hectares")
     )
-    assert "clarification-round limit" in final.analysis["assumptions"][0]
     assert len(calls) == 4
+
+
+def test_direct_style_never_waits_for_clarification() -> None:
+    from farmers_chatbot.clarification import max_clarification_rounds
+
+    assert max_clarification_rounds("direct") == 0
+    assert max_clarification_rounds("auto") == 1
+    assert max_clarification_rounds("guided") == 3
 
 
 def test_fallback_clarification_confusion_matrix() -> None:

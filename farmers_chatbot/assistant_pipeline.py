@@ -8,6 +8,7 @@ import os
 import re
 import time
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -184,6 +185,31 @@ class PipelineEvent(TurnEvent):
     """Backward-compatible name for the canonical typed turn event."""
 
 
+# Photos for the turn being analyzed. The clarification workflow rebuilds its
+# request from checkpointed state, which must never hold image bytes, so the
+# current turn's attachments travel by context instead.
+_TURN_ATTACHMENTS: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+    "raise_turn_attachments", default=()
+)
+
+
+def _with_attached_images(brief: str, request: Any) -> str | list[dict[str, Any]]:
+    """Let the analyzer see attached photos so it can identify the crop and
+    problem itself instead of asking the farmer to describe the image."""
+
+    images = [
+        str(item["data_url"])
+        for item in getattr(request, "attachments", ()) or ()
+        if isinstance(item, dict) and item.get("data_url")
+    ]
+    if not images:
+        return brief
+    return [
+        {"type": "text", "text": brief},
+        *({"type": "image_url", "image_url": {"url": url}} for url in images),
+    ]
+
+
 class AssistantEngine:
     def __init__(
         self,
@@ -228,19 +254,25 @@ class AssistantEngine:
         actor_id = (
             request.actor_id if isinstance(request, TurnCommand) else request.user_id
         )
-        outcome = await self.clarification.advance(
-            actor_id=actor_id,
-            conversation_id=request.conversation_id,
-            text=request.text,
-            language=language,
-            mode=request.mode,
-            clarification_style=request.clarification_style,
-            history=history,
-            clarification_response=(
-                request.clarification_response
-                if isinstance(request, TurnCommand) else None
-            ),
+        attachments_token = _TURN_ATTACHMENTS.set(
+            tuple(getattr(request, "attachments", ()) or ())
         )
+        try:
+            outcome = await self.clarification.advance(
+                actor_id=actor_id,
+                conversation_id=request.conversation_id,
+                text=request.text,
+                language=language,
+                mode=request.mode,
+                clarification_style=request.clarification_style,
+                history=history,
+                clarification_response=(
+                    request.clarification_response
+                    if isinstance(request, TurnCommand) else None
+                ),
+            )
+        finally:
+            _TURN_ATTACHMENTS.reset(attachments_token)
         effective_text = outcome.effective_text
         language = detect_language(effective_text)
         fallback = self._heuristic_analysis(
@@ -691,6 +723,7 @@ class AssistantEngine:
             text=str(state.get("effective_text") or state.get("original_text") or ""),
             mode=str(state.get("mode") or "standard"),
             clarification_style=str(state.get("clarification_style") or "auto"),
+            attachments=_TURN_ATTACHMENTS.get(),
         )
         language = str(state.get("language") or detect_language(request.text))
         analysis = await self._analyze(
@@ -754,23 +787,39 @@ class AssistantEngine:
                         "or otherwise implausible local choices without user context. "
                         "Include an "
                         "I-don't-know option only when it is genuinely useful. "
+                        "attached_images counts photos the user sent with this "
+                        "message, and they are included here: use them to identify "
+                        "the crop and the visible problem, never ask the user to "
+                        "attach, upload, or describe an image, and only ask about "
+                        "what the photo cannot show. "
+                        "Never ask about anything the question, recent_context, or a "
+                        "'Clarified user context' block already answers. When "
+                        "clarifications_already_asked is 1 or more, set "
+                        "needs_clarification to false and record reasonable "
+                        "assumptions instead, unless the style is guided and a "
+                        "genuinely new safety-critical detail is missing. "
                         "Do not include reasoning or chain-of-thought."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(
+                    "content": _with_attached_images(json.dumps(
                         {
                             "question": request.text,
                             "language": language,
                             "mode": request.mode,
                             "clarification_style": request.clarification_style,
                             "clarifications_already_asked": clarification_count,
+                            "attached_images": sum(
+                                1
+                                for item in getattr(request, "attachments", ()) or ()
+                                if str(item.get("kind") or "image") == "image"
+                            ),
                             "default_geography": "Akkar, Lebanon",
                             "recent_context": context,
                         },
                         ensure_ascii=False,
-                    ),
+                    ), request),
                 },
             ],
             "temperature": 0,

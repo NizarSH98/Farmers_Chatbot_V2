@@ -15,7 +15,7 @@ from .knowledge import SearchResult
 from .release_knowledge import ReleaseKnowledgeGateway, ReleaseUnavailable
 from .tools import ToolRegistry
 
-SYSTEM_PROMPT_VERSION = "raise-pilot-2026-08-v1"
+SYSTEM_PROMPT_VERSION = "raise-pilot-2026-11-v2"
 CLARIFICATION_STYLES = {"auto", "guided", "direct"}
 FOLLOW_UP_PREFIX = "FOLLOWUP:"
 
@@ -144,9 +144,9 @@ class AssistantPromptBuilder:
             else "Answer in clear, accessible English and explain technical terms briefly."
         )
         general_rule = (
-            "You may use stable model knowledge for background explanation, but "
-            "label material that is not locally verified and never present it as "
-            "coming from retrieved sources."
+            "You may use stable model knowledge for background explanation. Say "
+            "once, briefly, when advice goes beyond the supplied sources, and never "
+            "present it as coming from them; do not hedge every sentence."
             if profile.allow_general_knowledge
             else "Use only the supplied project knowledge. If it is insufficient, say so."
         )
@@ -193,9 +193,9 @@ class AssistantPromptBuilder:
             "</context>\n\n"
             "<domain_rules>\n"
             "For economics, state currency, date, unit, assumptions, scenarios, "
-            "and break-even logic; never guarantee profit. For science, explain "
-            "evidence type, applicability, units, uncertainty, and practical "
-            "meaning.\n"
+            "and break-even logic; never guarantee profit. For science, give the "
+            "practical meaning with units and where it applies; mention "
+            "uncertainty only where it would change the farmer's decision.\n"
             "</domain_rules>\n\n"
             "<tool_use>\n"
             "Use tools for current, local, scientific, economic, regulatory, "
@@ -212,14 +212,22 @@ class AssistantPromptBuilder:
             "or rapidly spreading crop risks to a qualified local professional.\n"
             "</safety>\n\n"
             "<citations>\n"
-            "Cite RAISE items using their exact square-bracket ID and live "
-            "sources using Markdown links.\n"
+            "Cite RAISE items using their exact square-bracket ID placed right "
+            "after the claim it supports, and live sources using Markdown links. "
+            "Keep citations unobtrusive: do not add a separate sources or "
+            "references section, because the interface lists sources on request.\n"
             "</citations>\n\n"
             "<output_format>\n"
-            "Separate verified facts, estimates, assumptions, and "
-            "recommendations. Never reveal hidden chain-of-thought; give only a "
-            "concise basis, sources, assumptions, and limitations. Put the short "
-            "practical answer first.\n"
+            "Lead with a direct, confident answer in the first sentence, then "
+            "give clear practical steps. Write like an experienced local "
+            "agronomist talking to a farmer: plain, warm, and specific. Do not "
+            "open with disclaimers, do not repeat caveats, and do not hedge claims "
+            "the sources support. State an assumption in one short line only when "
+            "it changes the advice. Reserve caution for genuine safety limits. "
+            "Give the shortest answer that fully solves the problem, usually "
+            "under 200 words with a short list for steps; go longer only when "
+            "the user asks for a plan, budget, or comparison. "
+            "Never reveal hidden chain-of-thought.\n"
             "</output_format>\n\n"
             "<follow_up>\n"
             "After a complete answer (not a clarification), end with exactly one "
