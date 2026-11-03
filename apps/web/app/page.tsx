@@ -1,5 +1,5 @@
-import { ChatWorkspace } from "@/components/ChatWorkspace";
+import { AppShell } from "@/components/raise/app-shell";
 
 export default function Home() {
-  return <ChatWorkspace />;
+  return <AppShell />;
 }

@@ -142,6 +142,10 @@ export interface Message {
   revealChars?: number;
   feedback?: "helpful" | "not_helpful";
   feedbackPending?: boolean;
+  /** Client-only: the pipeline stage of a turn still in progress. */
+  stage?: string;
+  /** Client-only: persisted id when the runtime id is a client-side one. */
+  serverId?: string;
 }
 
 export interface StreamEvent {

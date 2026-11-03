@@ -90,7 +90,43 @@ const copy = {
     uploadDocument: "رفع ملف",
     download: "تنزيل",
     exportData: "تصدير بياناتي",
-    noItems: "لا توجد عناصر بعد"
+    noItems: "لا توجد عناصر بعد",
+    voiceInput: "تكلّم بدل الكتابة",
+    stopVoice: "إيقاف الاستماع",
+    readAloud: "قراءة الجواب بصوت عالٍ",
+    stopReading: "إيقاف القراءة",
+    edit: "تعديل",
+    more: "المزيد",
+    exportMarkdown: "تنزيل كملف نصي",
+    scrollToBottom: "الانتقال إلى الأسفل",
+    removeAttachment: "إزالة المرفق",
+    onlyOneImage: "يمكن إرفاق صورة واحدة فقط مع كل رسالة.",
+    showSources: "المصادر",
+    sourceDocument: "مرجع معتمد",
+    sourceProject: "ملف المشروع",
+    sourceWeb: "مصدر على الإنترنت",
+    interrupted: "انقطع الاتصال قبل اكتمال الجواب. أعد المحاولة.",
+    cancelled: "أوقفت الجواب.",
+    theme: "المظهر",
+    themeLight: "فاتح",
+    themeDark: "داكن",
+    themeSystem: "حسب الجهاز",
+    menu: "القائمة",
+    admin: "إدارة المعرفة",
+    archived: "مؤرشفة",
+    clarifyHint: "اختر ما ينطبق عليك لأعطيك جواباً أدق.",
+    otherAnswer: "إجابة أخرى",
+    previous: "السابق",
+    reviewedPassages: "مقاطع مراجَعة",
+    reviewedSource: "مصدر مراجَع",
+    next: "التالي",
+    working: "أعمل على الجواب…",
+    starterPrompts: [
+      "شو أفضل وقت لتقليم الزيتون بعكار؟",
+      "أوراق البندورة عم تصفر، شو السبب؟",
+      "بدّي خطة ري لبستان تفاح صغير",
+      "كيف بحسب كلفة وربح دونم بطاطا؟"
+    ]
   },
   en: {
     appName: "RAISE",
@@ -181,7 +217,43 @@ const copy = {
     uploadDocument: "Upload document",
     download: "Download",
     exportData: "Export my data",
-    noItems: "Nothing here yet"
+    noItems: "Nothing here yet",
+    voiceInput: "Speak instead of typing",
+    stopVoice: "Stop listening",
+    readAloud: "Read answer aloud",
+    stopReading: "Stop reading",
+    edit: "Edit",
+    more: "More",
+    exportMarkdown: "Download as text",
+    scrollToBottom: "Scroll to bottom",
+    removeAttachment: "Remove attachment",
+    onlyOneImage: "You can attach one image per message.",
+    showSources: "Sources",
+    sourceDocument: "Reviewed reference",
+    sourceProject: "Project file",
+    sourceWeb: "Web source",
+    interrupted: "The connection dropped before the answer finished. Try again.",
+    cancelled: "You stopped this answer.",
+    theme: "Appearance",
+    themeLight: "Light",
+    themeDark: "Dark",
+    themeSystem: "Match device",
+    menu: "Menu",
+    admin: "Knowledge admin",
+    archived: "Archived",
+    clarifyHint: "Pick what fits your situation so I can be precise.",
+    otherAnswer: "Something else",
+    previous: "Previous",
+    reviewedPassages: "reviewed passages",
+    reviewedSource: "Reviewed source",
+    next: "Next",
+    working: "Working on it…",
+    starterPrompts: [
+      "When should I prune olive trees in Akkar?",
+      "My tomato leaves are turning yellow — why?",
+      "Plan irrigation for a small apple orchard",
+      "Estimate cost and profit for a dunum of potatoes"
+    ]
   }
 } as const;
 
@@ -198,3 +270,6 @@ export const t = (language: Language, key: CopyKey): string =>
 
 export const thinkingLines = (language: Language): readonly string[] =>
   copy[language].thinkingLines;
+
+export const starterPrompts = (language: Language): readonly string[] =>
+  copy[language].starterPrompts;
