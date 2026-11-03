@@ -6,6 +6,8 @@ import socket
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 from farmers_chatbot.agrifood_ontology import ENTITIES, RELATIONS
 from farmers_chatbot.knowledge_markdown import parse_knowledge_markdown
 from farmers_chatbot.knowledge_release import build_release_batch
@@ -51,6 +53,10 @@ def test_opaque_source_ranges_and_lists_are_fully_reconciled() -> None:
     assert not any(marker in reconciled for marker in ("[S12", "[S15", "[S01]"))
 
 
+@pytest.mark.skipif(
+    not SOURCE_DOCX.is_file(),
+    reason="the contractual source DOCX is local evidence and is never committed",
+)
 def test_docx_conversion_is_offline_bilingual_and_graph_ready(
     monkeypatch,
     tmp_path: Path,

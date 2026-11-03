@@ -24,21 +24,23 @@ down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Checksums are over LF-normalised bytes (the Git blob content), so a Windows
+# CRLF checkout and a Linux/CI/container LF checkout verify identically.
 _LEGACY_MIGRATIONS = (
     (
         "001_pilot_schema.sql",
-        "c23c8563826b9472c828322f35318e8089ba4a206cce058825dbb163300ce3a1",
+        "677cf9104958910bbfc72f90ba1919eac532b8755eb0a7b5f258895f17234432",
     ),
     (
         "002_web_platform.sql",
-        "b2088ef2ad2a125dd246c2fe2ede64f186d228ee3bdaef45678dd0c8fb30e5cd",
+        "62a3e389596b909783e89faf15cf7444701459d3cc9c83c13ddab4dac3cd64dc",
     ),
 )
 
 
 def _legacy_sql(filename: str, expected_sha256: str) -> str:
     path = Path(__file__).resolve().parents[1] / filename
-    content = path.read_bytes()
+    content = path.read_bytes().replace(b"\r\n", b"\n")
     actual_sha256 = hashlib.sha256(content).hexdigest()
     if actual_sha256 != expected_sha256:
         raise RuntimeError(
