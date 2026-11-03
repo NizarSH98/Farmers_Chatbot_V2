@@ -75,3 +75,6 @@ tsconfig.tsbuildinfo
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local browser-verification screenshots and logs
+.playwright-mcp/

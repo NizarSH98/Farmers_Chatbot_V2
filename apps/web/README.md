@@ -3,39 +3,45 @@
 Purpose: explain where the Next.js user interface lives and which file owns
 each frontend responsibility.
 
-## Current entry points
+The chat UI is assembled from proven open-source modules: assistant-ui for the
+conversation runtime and thread, shadcn/ui (Base UI) for primitives, and
+Tailwind v4 with RAISE design tokens. RAISE-specific code adapts our backend to
+those modules rather than re-implementing chat behavior.
+
+## Entry points and ownership
 
 | Path | Responsibility |
 | --- | --- |
-| app/page.tsx | Loads the main chat workspace |
-| app/admin/page.tsx | Separate knowledge-release and editor administration |
-| app/api/[...path]/route.ts | Same-origin server proxy from browser /api calls to the private FastAPI service |
-| app/layout.tsx | Root HTML, metadata, language, and global styles |
-| app/globals.css | Shared visual tokens, layout, responsive, RTL, and component styles |
-| components/ChatWorkspace.tsx | Current chat/conversation/project/settings UI; planned Phase 0 split |
+| app/page.tsx | Mounts the app shell |
+| app/layout.tsx | Root HTML, IBM Plex Sans Arabic, theme, tooltips, toasts |
+| app/globals.css | RAISE design tokens (light + dark) and base typography |
+| app/admin/page.tsx | Knowledge-release and editor administration |
+| app/api/[...path]/route.ts | Same-origin proxy from browser /api calls to FastAPI |
+| components/raise/app-state.tsx | Session, consent, config, language, answer preferences |
+| components/raise/chat-runtime.tsx | assistant-ui ExternalStoreRuntime over our SSE turns: edit, retry, stop, attachments, feedback, dictation, read-aloud, conversation list |
+| components/raise/convert.ts | Message → assistant-ui parts (progress, clarification, sources, artifacts) |
+| components/raise/message-parts.tsx | Renderers for those parts |
+| components/raise/app-shell.tsx, app-sidebar.tsx, settings-dialog.tsx, workspace-sheet.tsx, gates.tsx | Layout, navigation, settings, projects, sign-in/consent screens |
+| components/assistant-ui/, components/ui/, hooks/ | Vendored registry code (assistant-ui, shadcn); keep close to upstream |
 | lib/api.ts | Session-aware HTTP, uploads, and SSE turn streaming |
-| lib/auth.ts | Browser session/login helpers |
-| lib/types.ts | API and UI TypeScript contracts |
-| lib/i18n.ts | Central Arabic and English interface copy |
-| lib/messages.ts | Message merging that preserves client-only state |
+| lib/speech.ts | Language-aware read-aloud (Arabic voice for Arabic answers) |
+| lib/sources.ts | Groups per-passage citations into reader-facing sources |
+| lib/i18n.ts | Arabic and English interface copy |
 
-Tests sit next to the component or library they verify.
+Tests sit next to the code they verify.
 
-## Change boundary
+## Updating vendored components
 
-The approved target structure and behavior are defined in
-[the product experience specification](../../docs/product/PRODUCT_EXPERIENCE_SPEC.md).
-Do not redesign individual screens independently of that contract.
-
-Phase 0 splits ChatWorkspace by feature without changing behavior. Visual
-implementation starts in Phase 1 only after the product contract is approved.
+Re-pull with `npx shadcn@latest add <registry url>`, then re-apply the RAISE
+localisation hook (`useKitText`) and token classes. Keep behavior changes in
+`components/raise/`.
 
 ## Commands
 
 ~~~powershell
 npm ci
-npm run typecheck
+npx tsc --noEmit
 npm run lint
-npm test -- --run
+npx vitest run
 npm run build
 ~~~
