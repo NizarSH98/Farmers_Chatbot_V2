@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- local object URL preview is not a deployable image asset */
+/** Current all-in-one chat workspace; Phase 0 will split it by feature. */
 
-import type { Session } from "@supabase/supabase-js";
 import {
   Archive,
   Check,
@@ -45,9 +45,14 @@ import {
   streamTurn,
   uploadImage
 } from "@/lib/api";
+import {
+  beginLogin,
+  endSession,
+  loadAuthSession,
+  type BrowserSession
+} from "@/lib/auth";
 import { t, thinkingLines } from "@/lib/i18n";
 import { mergePreservingClientState } from "@/lib/messages";
-import { supabaseBrowser } from "@/lib/supabase";
 import type {
   AppConfig,
   Artifact,
@@ -115,7 +120,7 @@ export function ChatWorkspace() {
     const saved = localStorage.getItem("raise-language");
     return saved === "en" || saved === "ar" ? saved : "ar";
   });
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<BrowserSession | null>(null);
   const [profile, setProfile] = useState<CurrentUser | null>(null);
   const [config, setConfig] = useState<AppConfig>(initialConfig);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -163,6 +168,7 @@ export function ChatWorkspace() {
   const [clarificationAnswers, setClarificationAnswers] = useState<
     Record<string, Record<string, string | string[]>>
   >({});
+  const [clarificationSteps, setClarificationSteps] = useState<Record<string, number>>({});
   const [customAnswerFor, setCustomAnswerFor] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -171,7 +177,7 @@ export function ChatWorkspace() {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const localPreviewUrls = useRef(new Set<string>());
 
-  const token = LOCAL_AUTH ? "local-development" : session?.access_token || "";
+  const token = LOCAL_AUTH ? "local-development" : session?.csrf_token || "";
   const rtl = language === "ar";
   const text = useCallback(
     (key: Parameters<typeof t>[1]) => t(language, key),
@@ -195,12 +201,9 @@ export function ChatWorkspace() {
       return;
     }
 
-    const supabase = supabaseBrowser();
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    let active = true;
+    loadAuthSession().then((next) => {
+      if (!active) return;
       setSession(next);
       if (!next) {
         setProfile(null);
@@ -208,8 +211,11 @@ export function ChatWorkspace() {
         setMessages([]);
         setActiveId(null);
       }
+      setLoading(false);
     });
-    return () => data.subscription.unsubscribe();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -362,20 +368,14 @@ export function ChatWorkspace() {
 
   const signIn = async () => {
     setError("");
-    const { error: authError } = await supabaseBrowser().auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin + "/auth/callback",
-        queryParams: { prompt: "select_account" }
-      }
-    });
-    if (authError) setError(authError.message);
+    beginLogin();
   };
 
   const signOut = async () => {
     abortRef.current?.abort();
     if (LOCAL_AUTH) return;
-    await supabaseBrowser().auth.signOut();
+    await endSession(token);
+    setSession(null);
   };
 
   const acceptAgreement = async () => {
@@ -765,7 +765,7 @@ export function ChatWorkspace() {
     if (!token) return;
     try {
       await apiFetch("/v1/account", token, { method: "DELETE" });
-      await supabaseBrowser().auth.signOut({ scope: "local" });
+      setSession(null);
       setDialog(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : text("error"));
@@ -928,16 +928,29 @@ export function ChatWorkspace() {
       ? text("verification")
       : text("analyzing");
 
+  const clarificationQuestionIsComplete = (
+    message: Message,
+    question: ClarificationQuestion
+  ): boolean => {
+    const answers = clarificationAnswers[message.id] || {};
+    if (!question.required) return true;
+    const answer = answers[question.id];
+    return Array.isArray(answer)
+      ? answer.some((value) => value.trim())
+      : Boolean(String(answer || "").trim());
+  };
+
+  const clarificationStepFor = (message: Message): number => {
+    if (!message.interaction) return 0;
+    const count = clarificationQuestions(message.interaction).length;
+    return Math.min(clarificationSteps[message.id] || 0, Math.max(0, count - 1));
+  };
+
   const clarificationIsComplete = (message: Message): boolean => {
     if (!message.interaction) return false;
-    const answers = clarificationAnswers[message.id] || {};
-    return clarificationQuestions(message.interaction).every((question) => {
-      if (!question.required) return true;
-      const answer = answers[question.id];
-      return Array.isArray(answer)
-        ? answer.some((value) => value.trim())
-        : Boolean(String(answer || "").trim());
-    });
+    return clarificationQuestions(message.interaction).every((question) =>
+      clarificationQuestionIsComplete(message, question)
+    );
   };
 
 
@@ -989,7 +1002,60 @@ export function ChatWorkspace() {
       delete next[message.id];
       return next;
     });
+    setClarificationSteps((current) => {
+      const next = { ...current };
+      delete next[message.id];
+      return next;
+    });
     void submit(summary, response);
+  };
+
+  const renderClarificationNavigation = (message: Message) => {
+    if (
+      !message.interaction ||
+      pendingClarificationId !== message.id
+    ) return null;
+    const questions = clarificationQuestions(message.interaction);
+    const step = clarificationStepFor(message);
+    const currentQuestion = questions[step];
+    const lastQuestion = step === questions.length - 1;
+    return (
+      <div className="clarification-navigation">
+        <button
+          className="secondary-button"
+          disabled={step === 0 || sending}
+          onClick={() => setClarificationSteps((current) => ({
+            ...current,
+            [message.id]: Math.max(0, step - 1)
+          }))}
+          type="button"
+        >
+          {text("previousQuestion")}
+        </button>
+        {lastQuestion ? (
+          <button
+            className="clarification-submit"
+            disabled={!clarificationIsComplete(message) || sending}
+            onClick={() => submitClarification(message)}
+            type="button"
+          >
+            <Send />{text("submitAnswers")}
+          </button>
+        ) : (
+          <button
+            className="clarification-submit"
+            disabled={!clarificationQuestionIsComplete(message, currentQuestion) || sending}
+            onClick={() => setClarificationSteps((current) => ({
+              ...current,
+              [message.id]: step + 1
+            }))}
+            type="button"
+          >
+            {text("nextQuestion")}
+          </button>
+        )}
+      </div>
+    );
   };
 
 
@@ -1360,13 +1426,16 @@ export function ChatWorkspace() {
                         ))}
                       </div>
                     )}
-                    {message.interaction && message.status === "clarification" && (
+                    {message.interaction &&
+                      message.status === "clarification" &&
+                      pendingClarificationId === message.id && (
                       <div
                         className={"clarification-form " + (
                           pendingClarificationId === message.id ? "active" : "resolved"
                         )}
                       >
                         {clarificationQuestions(message.interaction).map((question, questionIndex) => {
+                          if (questionIndex !== clarificationStepFor(message)) return null;
                           const formAnswers = clarificationAnswers[message.id] || {};
                           const answer = formAnswers[question.id];
                           const customKey = message.id + ":" + question.id;
@@ -1382,7 +1451,7 @@ export function ChatWorkspace() {
                           return (
                             <fieldset key={question.id} disabled={pendingClarificationId !== message.id || sending}>
                               <legend>
-                                <span>{questionIndex + 1}</span>
+                                <span>{questionIndex + 1} / {clarificationQuestions(message.interaction!).length}</span>
                                 {question.prompt}
                               </legend>
                               {question.answer_type !== "text" && (
@@ -1443,16 +1512,7 @@ export function ChatWorkspace() {
                             </fieldset>
                           );
                         })}
-                        {pendingClarificationId === message.id && (
-                          <button
-                            className="clarification-submit"
-                            disabled={!clarificationIsComplete(message) || sending}
-                            onClick={() => submitClarification(message)}
-                            type="button"
-                          >
-                            <Send />{text("submitAnswers")}
-                          </button>
-                        )}
+                        {renderClarificationNavigation(message)}
                       </div>
                     )}
                     {message.role === "assistant" && message.content && (
@@ -1535,9 +1595,11 @@ export function ChatWorkspace() {
             <div className="composer-tools">
               <input
                 accept="image/jpeg,image/png"
+                aria-hidden="true"
                 className="visually-hidden"
                 onChange={(event) => void handleImage(event.target.files?.[0])}
                 ref={fileRef}
+                tabIndex={-1}
                 type="file"
               />
               <button

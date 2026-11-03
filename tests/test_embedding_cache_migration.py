@@ -25,7 +25,7 @@ def _migration():
 def test_embedding_cache_is_the_expected_linear_head() -> None:
     module, _ = _migration()
     assert module.revision == "20260812_0004"
-    assert EXPECTED_DATABASE_REVISION == "20260819_0006"
+    assert EXPECTED_DATABASE_REVISION == "20260901_0007"
     assert module.down_revision == "20260811_0003"
 
 
@@ -43,4 +43,3 @@ def test_release_version_can_be_rebuilt_for_a_different_approved_index() -> None
     assert "DROP CONSTRAINT knowledge_releases_version_key" in source
     assert "CREATE UNIQUE INDEX uq_knowledge_release_build" in source
     assert "source_manifest_sha256" in source
-

@@ -7,14 +7,19 @@ telemetry now require a real account.
 
 import pytest
 
+from farmers_chatbot.auth import UserIdentity
+
 
 def _user(store) -> str:
-    record = store.upsert_supabase_user(
-        auth_user_id="auth-storage-1",
-        email="tester@example.org",
-        name="Tester",
-        google_subject=None,
-        is_admin=False,
+    record = store.upsert_user(
+        UserIdentity(
+            user_id="",
+            issuer="https://identity.example.org",
+            subject="auth-storage-1",
+            email="tester@example.org",
+            name="Tester",
+            is_admin=False,
+        )
     )
     return str(record["id"])
 

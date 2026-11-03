@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-try:  # PostgreSQL support is optional in local/SQLite development.
+try:  # Optional only for lightweight contract tests that do not open the store.
     from psycopg import Error as PsycopgError
 except ModuleNotFoundError:
     class PsycopgError(Exception):
@@ -20,6 +20,7 @@ from .documents import ProjectSearchResult, search_project_chunks
 from .graph_repository import GraphRepository, GraphRepositoryError
 from .knowledge import SearchResult
 from .provider import ProviderClient
+from .release_knowledge import eligible_review_statuses
 
 
 @dataclass(frozen=True)
@@ -223,7 +224,7 @@ class PostgresGraphRetrieval(RetrievalService):
         project_chunks: list[dict[str, Any]] | None = None,
     ) -> EvidenceBundle:
         try:
-            release_id = await asyncio.to_thread(
+            release_id = request.release_pin or await asyncio.to_thread(
                 self.repository.active_release, self.deployment_scope
             )
         except (GraphRepositoryError, PsycopgError, OSError):
@@ -364,6 +365,7 @@ class PostgresGraphRetrieval(RetrievalService):
             passages=passages,
             claims=claims,
             graph_paths=paths,
+            release_id=release_id,
             warnings=warnings,
             knowledge_results=knowledge_results,
             project_results=project_results,
@@ -380,7 +382,7 @@ class PostgresGraphRetrieval(RetrievalService):
                 ],
                 "vector_approved": self.vector_approved,
                 "embedding_approval_sha256": self.embedding_approval_sha256,
-                "graph_hops": min(2, max(1, request.graph_hops)),
+                "graph_hops": min(2, max(0, request.graph_hops)),
                 "resolved_entities": list(entity_ids),
             },
         )
@@ -444,18 +446,8 @@ class PostgresGraphRetrieval(RetrievalService):
         return ordered, scores
 
     def _review_statuses(self, request: RetrievalRequest) -> tuple[str, ...]:
-        if (
-            self.deployment_scope == "production"
-            or request.risk == "high"
-            or request.currentness == "current"
-        ):
-            return ("approved",)
-        return (
-            "approved",
-            "field_review",
-            "technical_review",
-            "draft",
-            "ai_draft",
+        return eligible_review_statuses(
+            self.deployment_scope, risk=request.risk, currentness=request.currentness,
         )
 
     @staticmethod

@@ -17,6 +17,19 @@ from .knowledge import SearchResult
 
 DEFAULT_REVIEW_STATUSES: tuple[str, ...] = ("approved",)
 
+
+def eligible_review_statuses(
+    deployment_scope: str, *, risk: str = "medium", currentness: str = "stable"
+) -> tuple[str, ...]:
+    """Public scopes fail closed; draft access is explicit and internal only."""
+    if (
+        deployment_scope not in {"development", "test"}
+        or risk in {"high", "critical"}
+        or currentness == "current"
+    ):
+        return DEFAULT_REVIEW_STATUSES
+    return ("approved", "field_review", "technical_review", "draft", "ai_draft")
+
 # The release stores BCP-47-style codes; callers use detect_language() names.
 _LANGUAGE_CODES = {"english": "en", "arabic": "ar"}
 
@@ -59,10 +72,36 @@ class ReleaseKnowledgeGateway:
     ) -> None:
         self.repository = repository
         self.deployment_scope = deployment_scope
-        self.review_statuses = tuple(review_statuses) or DEFAULT_REVIEW_STATUSES
+        eligible = eligible_review_statuses(deployment_scope)
+        self.review_statuses = tuple(
+            status for status in review_statuses if status in eligible
+        ) or DEFAULT_REVIEW_STATUSES
+        self._release_pin: str | None = None
+        self._pinned = False
+
+    def for_release(
+        self, release_id: str | None, *, risk: str = "medium",
+        currentness: str = "stable",
+    ) -> ReleaseKnowledgeGateway:
+        """Create a turn-local view, including a pinned unavailable state."""
+        gateway = ReleaseKnowledgeGateway(
+            self.repository, deployment_scope=self.deployment_scope,
+            review_statuses=tuple(
+                status for status in self.review_statuses
+                if status in eligible_review_statuses(
+                    self.deployment_scope, risk=risk, currentness=currentness
+                )
+            ),
+        )
+        gateway._release_pin = release_id
+        gateway._pinned = True
+        return gateway
 
     def active_release_id(self) -> str:
-        release_id = self.repository.active_release(self.deployment_scope)
+        release_id = (
+            self._release_pin if self._pinned
+            else self.repository.active_release(self.deployment_scope)
+        )
         if not release_id:
             raise ReleaseUnavailable(
                 "No activated knowledge release is available for scope "

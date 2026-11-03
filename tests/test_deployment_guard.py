@@ -19,17 +19,22 @@ def _hosted_environment(**overrides: str) -> dict[str, str]:
         "APP_DISPLAY_NAME": "RAISE",
         "ORGANIZATION_NAME": "RAISE-ESDU",
         "PRIVACY_CONTACT_EMAIL": "privacy@example.org",
-        "CONSENT_VERSION": "project-2026-08-v1",
+        "CONSENT_VERSION": "project-2026-09-v2",
         "RETENTION_DAYS": "30",
         "DATABASE_URL": "postgresql://user:secret@db.example.org/raise",
-        "SUPABASE_URL": "https://project.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "publishable-key",
-        "SUPABASE_SERVICE_ROLE_KEY": "service-role-key",
-        "SUPABASE_STORAGE_BUCKET": "raise-private",
-        "WEB_AUTH_MODE": "supabase",
-        "WEB_ALLOWED_ORIGINS": "https://raise-ui.example.org",
-        "AUTH_MODE": "google",
-        "ACCESS_POLICY": "google_any",
+        "QDRANT_API_KEY": "a-strong-random-qdrant-key-over-32-characters",
+        "STORAGE_BACKEND": "local",
+        "LOCAL_FILE_ROOT": "/app/data/private",
+        "WEB_AUTH_MODE": "oidc",
+        "OIDC_ISSUER_URL": "https://identity.example.org",
+        "OIDC_CLIENT_ID": "raise-web",
+        "OIDC_CLIENT_SECRET": "oidc-client-secret",
+        "OIDC_SCOPES": "openid email profile",
+        "OIDC_REDIRECT_URI": "https://raise.example.org/api/auth/callback",
+        "AUTH_POST_LOGIN_REDIRECT_URL": "https://raise.example.org",
+        "APP_SESSION_SECRET": "a-long-random-session-secret-over-32-characters",
+        "AUTH_SESSION_MAX_AGE_SECONDS": "28800",
+        "ACCESS_POLICY": "any_verified_email",
         "ADMIN_EMAILS": "admin@example.org",
         "OPENROUTER_API_KEY": "openrouter-key",
         "OPENROUTER_ALLOWED_MODELS": "moonshotai/kimi-k3",
@@ -87,13 +92,19 @@ def test_hosted_web_accepts_complete_configuration_at_expected_revision(
     assert result is settings
 
 
-def test_hosted_web_rejects_insecure_origins() -> None:
+def test_hosted_web_rejects_insecure_oidc_redirects() -> None:
     settings = _settings(
         _hosted_environment(
-            WEB_ALLOWED_ORIGINS="http://localhost:3000,*",
+            OIDC_REDIRECT_URI="http://localhost:3000/api/auth/callback",
         )
     )
-    with pytest.raises(RuntimeError, match="explicit HTTPS origins only"):
+    with pytest.raises(RuntimeError, match="OIDC_REDIRECT_URI"):
+        validate_web_runtime(settings=settings, check_database_revision=False)
+
+
+def test_hosted_web_rejects_missing_qdrant_secret() -> None:
+    settings = _settings(_hosted_environment(QDRANT_API_KEY=""))
+    with pytest.raises(RuntimeError, match="QDRANT_API_KEY"):
         validate_web_runtime(settings=settings, check_database_revision=False)
 
 
@@ -165,5 +176,3 @@ def test_hosted_web_fails_when_database_revision_is_not_ready() -> None:
 
     with pytest.raises(RuntimeError, match="DATABASE_SCHEMA_REVISION"):
         validate_web_runtime(settings=settings, revision_checker=checker)
-
-

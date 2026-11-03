@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -92,6 +93,39 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def source_doc_provenance_sha256(
+    *,
+    english: Path,
+    arabic: Path,
+    disposition: Path,
+    source_doc: Path,
+) -> str:
+    """Verify original-source provenance without requiring the private DOCX."""
+
+    def declared_markdown_sha(path: Path) -> str:
+        match = re.search(
+            r"^source_doc_sha256:\s*([A-Fa-f0-9]{64})\s*$",
+            path.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+        return match.group(1).upper() if match else ""
+
+    declared = {
+        declared_markdown_sha(english),
+        declared_markdown_sha(arabic),
+        str(
+            json.loads(disposition.read_text(encoding="utf-8")).get(
+                "source_doc_sha256", ""
+            )
+        ).upper(),
+    }
+    if declared != {EXPECTED_SOURCE_DOC_SHA256}:
+        raise GraphBuildError("committed corpus source provenance is inconsistent")
+    if source_doc.is_file() and _sha256(source_doc).upper() != EXPECTED_SOURCE_DOC_SHA256:
+        raise GraphBuildError("source DOCX checksum changed")
+    return EXPECTED_SOURCE_DOC_SHA256
+
+
 def _command(value: dict[str, Any]) -> GraphBuildCommand:
     return GraphBuildCommand(**value)
 
@@ -99,11 +133,17 @@ def _command(value: dict[str, Any]) -> GraphBuildCommand:
 def source_manifest_hash(
     *, english: Path, arabic: Path, disposition: Path, source_doc: Path
 ) -> str:
+    source_doc_sha256 = source_doc_provenance_sha256(
+        english=english,
+        arabic=arabic,
+        disposition=disposition,
+        source_doc=source_doc,
+    )
     values = {
         "english_sha256": _sha256(english),
         "arabic_sha256": _sha256(arabic),
         "disposition_sha256": _sha256(disposition),
-        "source_doc_sha256": _sha256(source_doc).upper(),
+        "source_doc_sha256": source_doc_sha256,
         "ontology_sha256": ontology_fingerprint(),
         "parser_version": PARSER_VERSION,
         "projection_text_version": PROJECTION_TEXT_VERSION,
@@ -154,15 +194,17 @@ class GraphBuildRunner:
             Path(command.english_path),
             Path(command.arabic_path),
             Path(command.disposition_path),
-            Path(command.source_doc_path),
             Path(command.translation_report_path),
         ]
         missing = [str(path) for path in paths if not path.is_file()]
         if missing:
             raise GraphBuildError(f"required graph-build inputs are missing: {missing}")
-        source_hash = _sha256(Path(command.source_doc_path)).upper()
-        if source_hash != EXPECTED_SOURCE_DOC_SHA256:
-            raise GraphBuildError("source DOCX checksum changed")
+        source_hash = source_doc_provenance_sha256(
+            english=Path(command.english_path),
+            arabic=Path(command.arabic_path),
+            disposition=Path(command.disposition_path),
+            source_doc=Path(command.source_doc_path),
+        )
         if command.ontology_version != ONTOLOGY_VERSION:
             raise GraphBuildError("graph-build ontology version is not installed")
         actual_manifest = source_manifest_hash(

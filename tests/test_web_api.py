@@ -15,7 +15,6 @@ os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("DATABASE_URL", "")
 os.environ.setdefault("OPENROUTER_API_KEY", "")
 os.environ.setdefault("WEB_AUTH_MODE", "disabled")
-os.environ.setdefault("WEB_ALLOWED_ORIGINS", "http://localhost:3000")
 
 AUTH = {"Authorization": "Bearer test-token"}
 
@@ -37,15 +36,15 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
         from conftest import FakeReleaseKnowledge, new_pilot_store
 
         from farmers_chatbot.assistant_pipeline import AsyncAssistantPipeline
+        from farmers_chatbot.oidc_auth import OidcAuthClient
         from farmers_chatbot.storage_backends import LocalPrivateStorage
-        from farmers_chatbot.supabase_auth import SupabaseAuthClient
         from farmers_chatbot.trusted_sources import TrustedSourceClient
 
         store = new_pilot_store()
         storage = LocalPrivateStorage(root=os.path.join(td, "files"))
         knowledge = FakeReleaseKnowledge()
         trusted = TrustedSourceClient(None, enabled=False)
-        auth = SupabaseAuthClient()
+        auth = OidcAuthClient()
         test_http_client = httpx.AsyncClient()
         pipeline = AsyncAssistantPipeline(knowledge, client=test_http_client)
 

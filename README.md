@@ -1,174 +1,119 @@
 # RAISE Akkar Farmer Assistant
 
-RAISE is an Arabic-first, bilingual agricultural decision-support product for
-farmers and agri-food stakeholders in Akkar and rural Lebanon. It combines a
-modern Next.js workspace, one FastAPI assistant engine, evidence-backed local
-knowledge, farm/business tools, projects and documents, and guarded live-source
-connectors. It is more than a general chatbot: answers are routed through local
-retrieval, graph context, tools, citations, risk rules, and verification.
+RAISE is an Arabic-first, bilingual agricultural decision-support application.
+It combines a Next.js workspace, a FastAPI assistant engine, versioned local
+knowledge, PostgreSQL/pgvector, and a rebuildable Qdrant search projection.
 
-> **Pilot status:** The v0.3 corpus is project-owner approved for authenticated
-> pilot use. Expert/editor verification remains pending metadata and does not
-> create a recurring warning for farmers. Safety restrictions still apply. The
-> corpus is not an official ESDU publication, and no frontier-model superiority
-> claim has been established yet.
+## Product direction
 
-## Current architecture
+The exact experience to build is defined in the
+[product experience specification](docs/product/PRODUCT_EXPERIENCE_SPEC.md).
+It specifies novice-facing chat behavior, answer structure, reliability labels,
+projects, frontend/backend boundaries, delivery phases, and acceptance tests.
+Approve that contract before beginning the UI/backend redesign.
 
-- Next.js is the only user interface. Streamlit has been removed. WhatsApp is
-  a disabled thin FastAPI router, retained for its Meta protocol handling.
-- `TurnCoordinator`, `AssistantEngine`, `ProviderClient`, and `ToolExecutor`
-  provide one idempotent orchestration path with exactly one terminal turn.
-- PostgreSQL is the only persistence backend and is authoritative for immutable releases, evidence, claims,
-  relations, review state, projects, quotas, and activation history.
-- Qdrant 1.17.1 is a rebuildable exact-release projection with dense E5 vectors,
-  BM25 sparse vectors, multilingual text fields, flat lineage payloads, scalar
-  quantization, and atomic aliases.
-- Retrieval routes simple questions through vector/BM25 fusion, normal guidance
-  through contextual hybrid retrieval, and Deep questions through lazy two-hop
-  graph expansion, Personalized PageRank, and path pruning. PostgreSQL
-  lexical/graph retrieval is the Qdrant-outage fallback.
-- OpenRouter is used only for connected answer generation/comparisons. DOCX
-  extraction, corpus conversion, embeddings, graph construction, translation,
-  and golden-set construction run locally.
+## Repository map
 
-The active local pilot release is
-`release_4debc9a9de849675835bb255`: 36 sources, 36 documents, 192 chunks, 192
-claims, 260 entities, 649 bilingual/local aliases, 494 passage-backed relations,
-and 686 evidence links. Its two Qdrant collections contain 384 evidence points
-and 260 entity points.
+| Path | Purpose |
+| --- | --- |
+| apps/web | Next.js browser application and same-origin API proxy |
+| farmers_chatbot | FastAPI, assistant pipeline, persistence, retrieval, auth, and storage package |
+| migrations | Ordered Alembic PostgreSQL schema revisions |
+| knowledge_base | Reviewed bilingual knowledge and deterministic build inputs |
+| evaluation | Versioned evaluation datasets and reports |
+| scripts | Operator, bootstrap, evaluation, and maintenance commands |
+| deploy | Backup and restore container scripts |
+| docs | Active product, architecture, operations, governance, and template index |
+| legal | Bilingual user agreement and privacy text rendered by the API |
+| config | Versioned non-secret source/model registries |
+| tests | Backend, integration, migration, storage, and policy tests |
 
-## Knowledge and ontology
+Start with [the documentation map](docs/README.md), the
+[frontend map](apps/web/README.md), or the
+[backend map](farmers_chatbot/README.md) instead of browsing filenames.
 
-Canonical source files:
+## Runtime architecture
 
 ```text
-knowledge_base/
-|-- agrifood_knowledge_v0.3.en.md
-|-- agrifood_knowledge_v0.3.ar.md
-|-- agrifood_knowledge_v0.3.disposition.json
-|-- legacy/                            # build inputs only, never served
-|   |-- guide.json
-|   `-- sources.json
-`-- README.md
+Internet
+  -> Dokploy / Traefik (TLS)
+  -> Next.js web :3000
+       -> same-origin /api proxy
+       -> FastAPI :8000
+            -> PostgreSQL + pgvector :5432 (authoritative)
+            -> Qdrant :6333 (rebuildable projection)
+            -> private local volume or S3-compatible storage
+            -> OpenRouter when connected generation is enabled
+
+GitHub Actions -> GHCR SHA-tagged images -> Dokploy Compose deployment
+PostgreSQL dump + local private files -> encrypted off-VPS restic repository
 ```
 
-The original `ESDU_Agrifood_Knowledge_Base_v0.1.docx` remains unchanged and
-local/uncommitted. Its required SHA-256 is
-`3C0BAF8145E4A2E287BA5783F8AB26A7CEAE1C5340322C1EE065887CC9B75B0E`.
-All 32 source chapters have a recorded disposition. English and Arabic share
-the same stable knowledge, claim, relation, entity, and source IDs.
+Only the Next.js service is publicly routed. The API, database, and Qdrant use
+Docker networks. There is no Redis or always-on worker because the current
+application has no durable queue workload that justifies either service.
 
-The v0.3 schema defines 31 agricultural/business entity types and 34 relation
-types. Every persisted edge requires a supporting passage and typed geography,
-conditions, polarity, validity, risk, review state, and confidence.
+## Local start
 
-## One-command local release candidate
-
-Prerequisites: Docker Desktop, Python 3.12, Node 22.12+ (the container uses Node
-24), and enough disk/RAM. Ollama is optional for future uncached graph ambiguity
-resolution; the current checked release does not require OpenRouter to rebuild
-its deterministic material.
+Prerequisites are Docker Desktop and PowerShell. Host Python and Node are only
+needed for development checks, not to run the stack.
 
 ```powershell
 Copy-Item .env.example .env
 .\scripts\raise.ps1 start -Rebuild
-.\scripts\raise.ps1 status
 .\scripts\raise.ps1 build-graph
 .\scripts\raise.ps1 smoke
+.\scripts\raise.ps1 status
+```
+
+The local overlay binds only to loopback: web 3000, API 8000, PostgreSQL 55432,
+and Qdrant 6433. Local Compose explicitly disables login. Pilot and production
+startup fail closed unless OIDC, HTTPS, secrets, migrations, and storage are
+configured correctly.
+
+Useful commands:
+
+```powershell
+.\scripts\raise.ps1 logs
 .\scripts\raise.ps1 evaluate
 .\scripts\raise.ps1 ablate
 .\scripts\raise.ps1 graph-profile
 .\scripts\raise.ps1 export
+.\scripts\raise.ps1 stop
 ```
-
-PostgreSQL is required; there is no SQLite fallback and no bare-uvicorn
-mode. Data commands run inside the API container, so they need no host
-Python. If the published database port stops accepting connections on
-Windows, `docker compose restart postgres` repairs the Docker port proxy.
-
-Services bind only to localhost: web `3000`, API `8000`, PostgreSQL `55432`,
-and Qdrant `6433`. `export` writes a portable PostgreSQL dump, both Qdrant
-snapshots, and checksummed manifests under ignored `backups/`.
-
-Restore a selected bundle into the local stack:
-
-```powershell
-.\scripts\raise.ps1 restore -Path .\backups\raise-YYYYMMDD-HHMMSS
-```
-
-Restore replaces the selected local databases, verifies snapshot hashes,
-repairs Qdrant aliases, and runs the smoke test.
 
 ## Development gates
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-python -m pytest -q -m "not arabic"
-python -m pytest -q -m arabic
-python -m ruff check farmers_chatbot scripts tests mcp_server.py
-pip-audit -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe scripts\release_preflight.py
+.\.venv\Scripts\python.exe -m ruff check farmers_chatbot scripts tests mcp_server.py
+.\.venv\Scripts\python.exe -m pytest -q -m "not arabic"
+.\.venv\Scripts\python.exe -m pytest -q -m arabic
 npm ci --prefix apps/web
 npm run typecheck --prefix apps/web
-npm run test --prefix apps/web
 npm run lint --prefix apps/web
+npm run test --prefix apps/web
 npm run build --prefix apps/web
-npm audit --prefix apps/web --omit=dev
+docker compose -f compose.yaml config --quiet
+docker compose -f compose.yaml -f compose.override.yaml config --quiet
 ```
 
-The evaluation candidate contains 400 source-anchored cases: 240 tracked
-development cases and 160 ignored/checksum-sealed acceptance cases. It covers
-ten domains and English, MSA, Lebanese Arabic, Arabizi, and code-switching.
-Local reports currently measure retrieval; answer-level safety/citation and
-matched GPT/Claude comparisons require authorized provider access and human
-review. The cases are never indexed as knowledge.
+## Operations
 
-`scripts/run_ablations.py` runs the ablation ladder and reports what graph
-expansion adds over contextual hybrid retrieval. On the current release that
-delta is ~0 because dense and sparse fusion alone already reach 99.4%
-recall@10, so the set has no headroom to demonstrate it either way. A
-shuffled-path negative control confirms graph path retrieval is real
-(0.891 -> 0.018). `scripts/profile_graph.py` describes the graph structurally.
+The [documentation map](docs/README.md) identifies the authoritative file for
+each kind of work. The operating source of truth is
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). It covers GHCR,
+fresh VPS setup, Dokploy, environment, migrations, bootstrap, backups, restores,
+updates, rollback, monitoring, troubleshooting, and disaster recovery.
 
-## Interfaces and capabilities
+See also [architecture](docs/ARCHITECTURE.md), [database
+migrations](docs/DATABASE_MIGRATIONS.md), and the [migration
+report](docs/MIGRATION_REPORT.md).
 
-- REST/SSE `/v1/turns` remains backward compatible and supports idempotency,
-  persisted recovery, typed monotonic events, and exactly one terminal result.
-- Projects, private documents, artifacts, workspace export, feedback, consent,
-  data deletion, image input, Arabic/RTL, sources, and low-bandwidth recovery are
-  supported in FastAPI/Next.js.
-- Deterministic tools include enterprise budget/break-even/cash flow/sensitivity,
-  unit conversion, action plans, checklists, crop calendars, referrals, source
-  lookup, logframe status, and consented feedback.
-- MCP exposes bounded application tools without shell, arbitrary filesystem,
-  unrestricted URL, or generic database access. It serves the activated release
-  and therefore requires PostgreSQL.
-- Dynamic weather, prices, alerts, grants, contacts, and regulations must come
-  from an authorized connector carrying its passage, publisher, observation
-  time, expiry, and immutable evidence ID.
-
-## Safety, privacy, and deployment
+## Safety and license
 
 RAISE is decision support, not a substitute for an agronomist, veterinarian,
-laboratory, engineer, food-safety professional, or competent authority. Static
-pilot approval does not authorize exact chemical doses, veterinary
-prescriptions, definitive diagnoses, food-processing safety parameters, or
-unstamped legal/market claims.
-
-Connected generation sends the farmer's input and selected evidence to the
-configured provider. Do not collect phone numbers, precise personal location,
-or other personal data without approved necessity and consent. Pilot/production
-startup fails closed for invalid database, storage, migrations, origins,
-provider settings, consent, retention, or model allowlists.
-
-The locked hosted pilot topology remains Vercel + one Render FastAPI service +
-Supabase, with Qdrant hosting to be selected. Hosting migration, real managed
-restore, credentials, canary percentages, and the seven-day soak are the next
-operational phase. See
-`docs/LOCAL_RELEASE_CANDIDATE_HANDOFF.md` and
-`docs/CANONICAL_PILOT_RUNBOOK.md`.
-
-## License
-
-Software is MIT-licensed. Knowledge-source copyrights and rights to institutional
-names/branding are separate and require confirmation before public publication.
+laboratory, engineer, food-safety professional, or competent authority.
+Software is MIT-licensed. Knowledge-source copyrights and institutional naming
+rights remain separate.

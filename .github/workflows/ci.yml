@@ -1,5 +1,6 @@
 ﻿name: CI
 
+# Validate Python/frontend/migrations/security, then build and publish SHA images.
 on:
   push:
   pull_request:
@@ -117,4 +118,100 @@ jobs:
           if git grep -lP 'sk-or-v1[_-]|-----BEGIN (RSA |EC )?PRIVATE KEY-----|eyJhbGciOi[A-Za-z0-9]' -- ':!*.example' ':!*.md' ':!*.yml'; then
             echo "::error::Potential secret detected in tracked files"
             exit 1
+          fi
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [python, frontend, migration, security]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve lowercase GHCR image names
+        id: images
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "api=ghcr.io/${repository}-api" >> "$GITHUB_OUTPUT"
+          echo "web=ghcr.io/${repository}-web" >> "$GITHUB_OUTPUT"
+          echo "backup=ghcr.io/${repository}-backup" >> "$GITHUB_OUTPUT"
+      - name: Authenticate to GHCR
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: API image metadata
+        id: api-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.images.outputs.api }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Web image metadata
+        id: web-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.images.outputs.web }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Backup image metadata
+        id: backup-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.images.outputs.backup }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Build and optionally publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.api
+          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          tags: ${{ steps.api-meta.outputs.tags }}
+          labels: ${{ steps.api-meta.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: Build and optionally publish web image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          file: apps/web/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          tags: ${{ steps.web-meta.outputs.tags }}
+          labels: ${{ steps.web-meta.outputs.labels }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Build and optionally publish backup image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.backup
+          push: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          tags: ${{ steps.backup-meta.outputs.tags }}
+          labels: ${{ steps.backup-meta.outputs.labels }}
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,mode=max,scope=backup
+      - name: Notify Dokploy
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          DOKPLOY_DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}
+        run: |
+          if [ -n "$DOKPLOY_DEPLOY_WEBHOOK" ]; then
+            curl --fail --show-error --silent --request POST "$DOKPLOY_DEPLOY_WEBHOOK"
+          else
+            echo "DOKPLOY_DEPLOY_WEBHOOK is not configured; images were published without an automatic deployment."
           fi

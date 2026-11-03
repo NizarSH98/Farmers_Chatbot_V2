@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-EXPECTED_DATABASE_REVISION = "20260819_0006"
+EXPECTED_DATABASE_REVISION = "20260901_0007"
 
 
 class MigrationStateError(RuntimeError):

@@ -1,5 +1,8 @@
 # Internal Team Review Dashboard
 
+> **ARCHIVED.** These readiness percentages are a dated 2026-08 snapshot, not
+> current product, deployment, or contractual status.
+
 Last updated: 2026-08-01
 
 Percentages below are evidence-based starting points. “Build readiness” is an internal estimate; “contractual achievement” uses only evidence that directly satisfies the logframe.
@@ -8,7 +11,7 @@ Percentages below are evidence-based starting points. “Build readiness” is a
 
 | Activity | Build readiness | Contractual achievement | Reason |
 |---|---:|---:|---|
-| A.1.1.1 Architecture refinement | 91% | 0% | Forty-five automated tests, lint, compilation, authenticated workspace boundaries, persistence, artifacts, MCP/WhatsApp controls, public legal pages, a 30-worker local benchmark, and a 100% candidate bilingual retrieval result pass; live Google/Supabase isolation, connected-model load, and controlled availability remain unmeasured |
+| A.1.1.1 Architecture refinement | 91% | 0% | Automated tests, lint, compilation, authenticated workspace boundaries, persistence, artifacts, MCP/WhatsApp controls, public legal pages, a local benchmark, and a candidate bilingual retrieval pass exist; live OIDC isolation, connected-model load, and controlled availability remain unmeasured |
 | A.1.1.2 Governance framework | 75% | 0% | Three draft methodologies, lifecycle-wide bilingual policy drafts, an approval record, and review gates exist; institutional approval and meeting minutes are still required |
 | A.1.1.3 Stakeholder alignment | 15% | 0% | Cohort design and session method are documented; no controlled outreach/enrollment evidence exists |
 | A.1.2.1 Deployment/adoption | 78% | 0% | Streamlit and Meta test-number builds, open Google registration controls, deployment templates, quotas, persistence, portability, and a 20–30-user release runbook exist; provider setup, verified-domain/publication route, live gates, policy approval, and qualifying participation records are missing |

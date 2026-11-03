@@ -83,6 +83,7 @@ def store():
 # cannot be verified by something that is not a database.
 
 import os
+import re
 import subprocess
 import sys
 
@@ -106,18 +107,34 @@ def _prepare(dsn: str) -> str:
     """Create the throwaway test database once per session and migrate it."""
 
     import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict
 
-    head, _, database = dsn.rpartition("/")
+    connection_info = conninfo_to_dict(dsn)
+    database = connection_info.get("dbname", "")
+    if (
+        connection_info.get("host") not in {"127.0.0.1", "localhost", "::1"}
+        or not re.fullmatch(r"raise_test(?:_[a-z0-9_]+)?", database)
+    ):
+        raise ValueError(
+            "Destructive test fixtures require a loopback PostgreSQL database "
+            "named raise_test or raise_test_<suffix>."
+        )
+
     try:
         with psycopg.connect(
-            f"{head}/postgres", connect_timeout=8, autocommit=True
+            **{**connection_info, "dbname": "postgres"},
+            connect_timeout=8, autocommit=True,
         ) as admin:
             if not admin.execute(
                 "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
             ).fetchone():
-                admin.execute(f'CREATE DATABASE "{database}"')
-    except psycopg.OperationalError as exc:
-        _pytest.skip(f"local PostgreSQL is unavailable: {exc}")
+                admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
+    except psycopg.OperationalError:
+        _pytest.fail(
+            "Local test PostgreSQL is unavailable; start the isolated test database.",
+            pytrace=False,
+        )
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         env={**os.environ, "DATABASE_URL": dsn},
@@ -126,7 +143,10 @@ def _prepare(dsn: str) -> str:
         check=False,
     )
     if result.returncode != 0:
-        _pytest.skip(f"could not migrate the test database: {result.stderr[-400:]}")
+        _pytest.fail(
+            "Test database migration failed; integration verification cannot continue.",
+            pytrace=False,
+        )
     return dsn
 
 

@@ -884,7 +884,7 @@ class GraphRepository:
     ) -> list[dict[str, Any]]:
         """Return bounded, evidence-backed, bidirectional paths up to two hops."""
 
-        if not entity_ids:
+        if not entity_ids or max_hops <= 0:
             return []
         hops = max(1, min(int(max_hops), 2))
         with self._connection_factory() as connection:

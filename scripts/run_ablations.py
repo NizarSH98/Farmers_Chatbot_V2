@@ -95,11 +95,6 @@ async def _run_case(
         reverse=True,
     )
     evidence_ids = list(dict.fromkeys(item.evidence_id for item in evidence_items))
-    expected = {
-        evidence_id
-        for claim in case.claims
-        for evidence_id in claim.expected_evidence_ids
-    }
     candidate_paths = [
         list(path)
         for path in dict.fromkeys(
@@ -115,26 +110,18 @@ async def _run_case(
             for item in bundle.graph_paths
         )
     ]
-    retrieved_expected = expected.intersection(evidence_ids)
     return {
         "schema_version": "raise.eval.run.v1",
         "case_id": case.case_id,
         "system_id": f"ablation_{arm['id']}",
         "retrieved_evidence_ids": evidence_ids,
-        "graph_paths": candidate_paths[: len(case.expected_graph_paths)],
-        "citations": [
-            {"claim_id": claim.claim_id, "evidence_id": evidence_id, "entails": True}
-            for claim in case.claims
-            for evidence_id in claim.expected_evidence_ids
-            if evidence_id in evidence_ids
-        ],
+        "graph_paths": candidate_paths,
+        "citations": [],
         "escalated": False,
         "critical_violation": False,
         "unsafe_actions": [],
-        "quality_score": (
-            len(retrieved_expected) / len(expected) if expected else 1.0
-        ),
-        "success": True,
+        "quality_score": None,
+        "success": bundle.retrieval_metrics.get("backend") == "qdrant_lazy_graphrag",
         "cost_usd": 0.0,
         "ttft_ms": None,
         "end_to_end_ms": elapsed,
@@ -191,7 +178,8 @@ async def run(
                 _shuffle_graph_paths(records)
             for record in records:
                 RunRecord.from_dict(record)
-            run_path = output_dir / f"ablation-{arm['id']}.v1.jsonl"
+            suffix = ".shuffled" if shuffle_graph else ""
+            run_path = output_dir / f"ablation-{arm['id']}{suffix}.v1.jsonl"
             run_path.write_text(
                 "".join(
                     json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
@@ -214,7 +202,7 @@ async def run(
                     "graph": report["metrics"]["graph"],
                     "efficiency": {
                         key: report["metrics"]["efficiency"][key]
-                        for key in ("end_to_end_p50_ms", "end_to_end_p95_ms")
+                        for key in ("end_to_end_p50_ms", "end_to_end_p95_ms", "success_rate")
                     },
                 }
             )
@@ -289,7 +277,7 @@ def main() -> int:
             f"ndcg@10={retrieval['ndcg_at_k']:.4f} "
             f"graph_path={arm['graph']['path_accuracy']}"
         )
-    return 0
+    return 0 if all(arm["efficiency"]["success_rate"] == 1.0 for arm in report["arms"]) else 1
 
 
 if __name__ == "__main__":

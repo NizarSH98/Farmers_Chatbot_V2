@@ -3,17 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "./ChatWorkspace";
 
-vi.mock("@/lib/supabase", () => ({
-  supabaseBrowser: () => ({
-    auth: {
-      getSession: () =>
-        Promise.resolve({ data: { session: { access_token: "test-token" } } }),
-      onAuthStateChange: () => ({
-        data: { subscription: { unsubscribe: () => {} } }
-      }),
-      signOut: () => Promise.resolve({ error: null })
-    }
-  })
+vi.mock("@/lib/auth", () => ({
+  loadAuthSession: () => Promise.resolve({
+    authenticated: true,
+    csrf_token: "test-token"
+  }),
+  beginLogin: vi.fn(),
+  endSession: () => Promise.resolve()
 }));
 
 const assistantMessage = {
@@ -34,7 +30,7 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function stubBackend(feedbackStatus = 201) {
+function stubBackend(feedbackStatus = 201, messages: unknown[] = [assistantMessage]) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -66,7 +62,7 @@ function stubBackend(feedbackStatus = 201) {
         });
       }
       if (url.includes("/v1/conversations/c1/messages")) {
-        return jsonResponse({ items: [assistantMessage] });
+        return jsonResponse({ items: messages });
       }
       if (url.endsWith("/v1/usage")) {
         return jsonResponse({
@@ -120,6 +116,35 @@ function stubBackend(feedbackStatus = 201) {
     })
   );
 }
+
+const clarificationMessage = {
+  ...assistantMessage,
+  id: "clarification-1",
+  content: "I need a few details.",
+  status: "clarification",
+  interaction: {
+    interaction_id: "interaction-1",
+    status: "pending",
+    questions: [
+      {
+        id: "crop",
+        prompt: "Which crop are you growing?",
+        answer_type: "single",
+        required: true,
+        allow_other: false,
+        options: [{ id: "potato", label: "Potato", value: "potato" }]
+      },
+      {
+        id: "stage",
+        prompt: "What growth stage is it in?",
+        answer_type: "single",
+        required: true,
+        allow_other: false,
+        options: [{ id: "vegetative", label: "Vegetative", value: "vegetative" }]
+      }
+    ]
+  }
+};
 
 describe("ChatWorkspace feedback buttons", () => {
   afterEach(() => {
@@ -291,5 +316,69 @@ describe("ChatWorkspace interrupted stream recovery", () => {
       String(input).endsWith("/v1/turns/t-recover")
     )).toBe(true);
     expect(screen.queryByText("Partial")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatWorkspace upload accessibility", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("keeps the programmatic file input out of keyboard navigation", async () => {
+    stubBackend();
+    render(<ChatWorkspace />);
+
+    await screen.findByText("Answer text");
+    const input = document.querySelector('input[type="file"]');
+    expect(input).toHaveAttribute("aria-hidden", "true");
+    expect(input).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "إرفاق صورة" })).toBeInTheDocument();
+  });
+});
+
+describe("ChatWorkspace progressive clarification", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("shows one required question at a time and preserves a way back", async () => {
+    stubBackend(201, [clarificationMessage]);
+    render(<ChatWorkspace />);
+
+    await screen.findByText("Which crop are you growing?");
+    expect(screen.queryByText("What growth stage is it in?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "1 Potato" }));
+    fireEvent.click(screen.getByRole("button", { name: "السؤال التالي" }));
+    expect(await screen.findByText("What growth stage is it in?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "السؤال السابق" }));
+    expect(await screen.findByText("Which crop are you growing?")).toBeInTheDocument();
+  });
+
+  it("does not leave an older clarification form actionable", async () => {
+    const current = {
+      ...clarificationMessage,
+      id: "clarification-2",
+      content: "What irrigation system will you use?",
+      interaction: {
+        ...clarificationMessage.interaction,
+        interaction_id: "interaction-2",
+        questions: [{
+          id: "method",
+          prompt: "What irrigation system will you use?",
+          answer_type: "single",
+          required: true,
+          allow_other: false,
+          options: [{ id: "drip", label: "Drip", value: "drip" }]
+        }]
+      }
+    };
+    stubBackend(201, [clarificationMessage, current]);
+    render(<ChatWorkspace />);
+
+    await screen.findByRole("group", { name: /What irrigation system will you use/ });
+    expect(document.querySelectorAll(".clarification-form")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "1 Potato" })).not.toBeInTheDocument();
   });
 });

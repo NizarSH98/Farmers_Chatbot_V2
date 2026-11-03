@@ -11,8 +11,14 @@ projection; neither database replaces these versioned source files.
   companion with identical knowledge, claim, entity, relation, and source IDs.
 - `agrifood_knowledge_v0.3.disposition.json`: body-order disposition for all 32
   source chapters.
-- `ESDU_Agrifood_Knowledge_Base_v0.1.docx`: unchanged local source document. It
-  is excluded from runtime images and must not leave the operator's machine.
+- `translation-validation.v0.3.json`: committed semantic validation gate for
+  the exact English and Arabic corpus hashes.
+
+The unchanged original `ESDU_Agrifood_Knowledge_Base_v0.1.docx` is an optional
+offline conversion/review input. It is excluded from Git and runtime images.
+Production bootstrap verifies its recorded SHA-256 consistently across the
+committed English, Arabic, and chapter-disposition assets, so it has no hidden
+dependency on a private operator file.
 
 The v0.3 files are approved by the project owner for authenticated pilot use.
 Expert verification remains pending editorial metadata; it does not display a

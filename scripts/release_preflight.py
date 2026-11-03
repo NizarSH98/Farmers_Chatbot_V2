@@ -34,9 +34,17 @@ def main() -> int:
     required = {
         '.github/workflows/ci.yml',
         'alembic.ini',
+        'compose.override.yaml',
         'compose.yaml',
         'Dockerfile.api',
+        'Dockerfile.backup',
+        'deploy/backup/backup.sh',
+        'deploy/backup/restore.sh',
+        'docs/DEPLOYMENT.md',
+        'docs/README.md',
+        'docs/product/PRODUCT_EXPERIENCE_SPEC.md',
         'farmers_chatbot/legal.py',
+        'farmers_chatbot/oidc_auth.py',
         'legal/PRIVACY_POLICY.ar.md',
         'legal/PRIVACY_POLICY.en.md',
         'legal/USER_AGREEMENT.ar.md',
@@ -44,7 +52,7 @@ def main() -> int:
         'migrations/001_pilot_schema.sql',
         'migrations/env.py',
         'migrations/versions/20260811_0001_legacy_schema_baseline.py',
-        'render.yaml',
+        'migrations/versions/20260901_0007_provider_neutral_identity.py',
         'requirements.txt',
         'scripts/pilot_data_portability.py',
         'docs/DATA_PORTABILITY.md',
@@ -54,11 +62,40 @@ def main() -> int:
     if missing:
         errors.append('Required release files are missing: ' + ', '.join(missing))
 
-    render = (ROOT / 'render.yaml').read_text(encoding='utf-8')
-    if 'autoDeploy: false' not in render or 'plan: starter' not in render:
-        errors.append('Render must use the paid starter plan with autoDeploy disabled.')
-    if 'preDeployCommand: alembic upgrade head' not in render:
-        errors.append('Render must apply Alembic migrations before service startup.')
+    obsolete = {
+        'render.yaml',
+        'farmers_chatbot/supabase_auth.py',
+        'apps/web/lib/supabase.ts',
+        'apps/web/app/auth/callback/route.ts',
+    }
+    present_obsolete = [path for path in sorted(obsolete) if (ROOT / path).exists()]
+    if present_obsolete:
+        errors.append(
+            'Obsolete provider deployment files remain: '
+            + ', '.join(present_obsolete)
+        )
+
+    compose = (ROOT / 'compose.yaml').read_text(encoding='utf-8')
+    for contract in (
+        'internal: true',
+        'condition: service_completed_successfully',
+        'QDRANT__TELEMETRY_DISABLED',
+        'RESTIC_REPOSITORY',
+        'profiles: ["tools"]',
+    ):
+        if contract not in compose:
+            errors.append(f'Production Compose contract is missing {contract}.')
+    if 'ports:' in compose:
+        errors.append('Production Compose must not publish container ports directly.')
+
+    api_dockerfile = (ROOT / 'Dockerfile.api').read_text(encoding='utf-8')
+    if 'alembic upgrade head' in api_dockerfile:
+        errors.append('API startup must not apply database migrations implicitly.')
+
+    workflow = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+    for contract in ('ghcr.io/', 'type=sha,prefix=sha-', 'DOKPLOY_DEPLOY_WEBHOOK'):
+        if contract not in workflow:
+            errors.append(f'Container publication workflow is missing {contract}.')
 
     requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8')
     if 'alembic>=' not in requirements:
@@ -68,14 +105,21 @@ def main() -> int:
     for key in (
         'APP_ENV',
         'APP_DISPLAY_NAME',
-        'AUTH_MODE',
+        'WEB_AUTH_MODE',
         'CONSENT_VERSION',
         'DATABASE_URL',
         'OPENROUTER_ALLOWED_MODELS',
         'OPENROUTER_DEFAULT_MODEL',
         'OPENROUTER_ENFORCE_ZDR',
         'PRIVACY_CONTACT_EMAIL',
-        'SUPABASE_SERVICE_ROLE_KEY',
+        'OIDC_ISSUER_URL',
+        'OIDC_CLIENT_ID',
+        'APP_SESSION_SECRET',
+        'STORAGE_BACKEND',
+        'S3_BUCKET',
+        'RESTIC_REPOSITORY',
+        'RESTIC_PASSWORD',
+        'QDRANT_API_KEY',
     ):
         if key not in secrets:
             errors.append(f'Environment template is missing {key}.')

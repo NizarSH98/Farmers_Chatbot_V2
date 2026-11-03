@@ -19,7 +19,7 @@ def test_versioned_notice_is_bilingual_and_names_processing_boundaries():
     privacy = privacy_policy_markdown()
     privacy_ar = privacy_policy_markdown_ar()
     assert "OpenRouter" in privacy
-    assert "Supabase" in privacy
+    assert "S3-compatible object storage" in privacy
     assert "delete your account" in english
     assert "project lifecycle" in english
     assert "DRAFT" in english

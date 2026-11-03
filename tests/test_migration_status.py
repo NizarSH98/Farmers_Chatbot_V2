@@ -91,13 +91,9 @@ def test_store_refuses_any_non_postgresql_database_url() -> None:
         PilotStore(database_url="")
 
 
-def test_hosted_storage_refuses_local_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "pilot")
-    monkeypatch.setattr("farmers_chatbot.storage_backends.SUPABASE_URL", "")
-    monkeypatch.setattr(
-        "farmers_chatbot.storage_backends.SUPABASE_SERVICE_ROLE_KEY", ""
-    )
-    with pytest.raises(RuntimeError, match="local fallback is disabled"):
+def test_storage_refuses_unknown_backend(monkeypatch) -> None:
+    monkeypatch.setattr("farmers_chatbot.storage_backends.STORAGE_BACKEND", "unknown")
+    with pytest.raises(RuntimeError, match="STORAGE_BACKEND"):
         configured_file_storage()
 
 

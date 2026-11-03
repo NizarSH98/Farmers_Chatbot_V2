@@ -1,4 +1,4 @@
-'''Export, verify, and restore pilot data without Supabase-specific formats.'''
+'''Export, verify, and restore pilot data using portable formats.'''
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -98,18 +97,6 @@ def _dump_postgres(database_url: str, target: Path) -> None:
     if result.returncode:
         detail = (result.stderr or 'pg_dump failed').strip()[-1000:]
         raise RuntimeError(f'PostgreSQL export failed: {detail}')
-
-
-def _dump_sqlite(source: Path, target: Path) -> None:
-    if not source.is_file():
-        raise FileNotFoundError('Local SQLite pilot database was not found')
-    source_connection = sqlite3.connect(f'file:{source.resolve()}?mode=ro', uri=True)
-    target_connection = sqlite3.connect(target)
-    try:
-        source_connection.backup(target_connection)
-    finally:
-        target_connection.close()
-        source_connection.close()
 
 
 def export_backup(

@@ -22,6 +22,7 @@ from .qdrant_projection import (
     ProjectionError,
     QdrantProjectionRepository,
 )
+from .release_knowledge import eligible_review_statuses
 from .retrieval import (
     EvidenceBundle,
     EvidenceItem,
@@ -146,6 +147,7 @@ class QdrantGraphRetrieval(RetrievalService):
             )
             if not release_id:
                 raise ProjectionError("no active PostgreSQL release")
+            effective_request = replace(request, release_pin=release_id)
             projection = await asyncio.to_thread(
                 self.projections.projection, release_id
             )
@@ -154,7 +156,7 @@ class QdrantGraphRetrieval(RetrievalService):
             alias_variants = await self._alias_query_variants(request, release_id)
             if alias_variants:
                 effective_request = replace(
-                    request,
+                    effective_request,
                     queries=tuple(dict.fromkeys((*request.queries, *alias_variants))),
                     language="ar",
                 )
@@ -195,9 +197,9 @@ class QdrantGraphRetrieval(RetrievalService):
             self._search_result(item) for item in [*passages, *claims, *graph_items]
         ]
         channels = ["dense", "bm25", "rrf", "qdrant_formula"]
-        if route != "vector":
+        if route != "vector" and request.graph_hops > 0:
             channels.extend(["entity_alias", "graph"])
-        if route == "lazy_graph":
+        if route == "lazy_graph" and request.graph_hops > 0:
             channels.extend(["personalized_pagerank", "path_pruning"])
         if project_results:
             channels.append("tenant_project")
@@ -217,19 +219,16 @@ class QdrantGraphRetrieval(RetrievalService):
                 "retrieval_route": route,
                 "ranking_channels": channels,
                 "projection_status": "ready",
-                "graph_hops": 0 if route == "vector" else (2 if route == "lazy_graph" else 1),
+                "graph_hops": self._graph_hops(request, route),
                 "evidence_count": len(passages) + len(claims),
                 "graph_path_count": len(paths),
             },
         )
 
     def _statuses(self, request: RetrievalRequest) -> list[str]:
-        if self.deployment_scope == "production" or request.risk in {
-            "high",
-            "critical",
-        } or request.currentness == "current":
-            return ["approved"]
-        return ["approved", "field_review", "technical_review", "draft", "ai_draft"]
+        return list(eligible_review_statuses(
+            self.deployment_scope, risk=request.risk, currentness=request.currentness,
+        ))
 
     async def _vectors(
         self, query: str, language: str
@@ -414,6 +413,12 @@ class QdrantGraphRetrieval(RetrievalService):
                 break
         return selected
 
+    @staticmethod
+    def _graph_hops(request: RetrievalRequest, route: RetrievalRoute) -> int:
+        if route == "vector":
+            return 0
+        return min(max(0, request.graph_hops), 2 if route == "lazy_graph" else 1)
+
     async def _query_graph(
         self,
         request: RetrievalRequest,
@@ -421,7 +426,8 @@ class QdrantGraphRetrieval(RetrievalService):
         projection: dict[str, Any],
         route: RetrievalRoute,
     ) -> list[dict[str, Any]]:
-        if route == "vector":
+        hops = self._graph_hops(request, route)
+        if hops == 0:
             return []
         points = await self._hybrid_points(
             collection=str(projection["entity_collection"]),
@@ -457,7 +463,7 @@ class QdrantGraphRetrieval(RetrievalService):
             self.repository.graph_paths,
             release_id=release_id,
             entity_ids=entity_ids,
-            max_hops=2 if route == "lazy_graph" else 1,
+            max_hops=hops,
             review_statuses=tuple(self._statuses(request)),
             limit=min(100, max(request.top_k * 10, 40)),
         )

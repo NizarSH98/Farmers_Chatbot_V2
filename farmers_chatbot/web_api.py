@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import os
+import secrets
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -20,22 +21,26 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
-    Header,
     HTTPException,
     Query,
     Request,
     UploadFile,
 )
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.middleware.sessions import SessionMiddleware
 
 from .artifacts import ArtifactService
 from .assistant_contracts import TURN_SCHEMA_VERSION, TurnCommand
 from .assistant_pipeline import AssistantEngine
+from .auth import UserIdentity
 from .config import (
     APP_DISPLAY_NAME,
     APP_ENV,
+    APP_PUBLIC_URL,
+    APP_SESSION_SECRET,
+    AUTH_POST_LOGIN_REDIRECT_URL,
+    AUTH_SESSION_MAX_AGE_SECONDS,
     CONSENT_VERSION,
     MAX_CHAT_IMAGE_BYTES,
     MAX_PROJECT_FILE_BYTES,
@@ -43,7 +48,7 @@ from .config import (
     MODEL_CATALOG,
     OPENROUTER_ALLOWED_MODELS,
     RETENTION_DAYS,
-    WEB_ALLOWED_ORIGINS,
+    WEB_AUTH_MODE,
 )
 from .deployment_guard import validate_web_runtime
 from .documents import DocumentService
@@ -52,6 +57,7 @@ from .graph_repository import GraphRepository
 from .image_processing import InvalidChatImage, sanitize_chat_image
 from .language import detect_language
 from .legal import agreement_markdown, agreement_markdown_ar
+from .oidc_auth import OidcAuthClient, OidcAuthError
 from .pilot_store import IdempotencyConflict, PilotStore, TurnReservation
 from .provider import ProviderClient
 from .qdrant_projection import ProjectionConfig, QdrantProjectionRepository
@@ -60,11 +66,6 @@ from .release_knowledge import ReleaseKnowledgeGateway
 from .retention import purge_expired_content
 from .retrieval import PostgresGraphRetrieval, ProjectOnlyFallbackRetrieval
 from .storage_backends import PrivateFileStorage, configured_file_storage
-from .supabase_auth import (
-    SupabaseAuthClient,
-    SupabaseAuthError,
-    SupabaseIdentity,
-)
 from .tools import ToolRegistry
 from .trusted_sources import TrustedSourceClient
 from .turn_coordinator import TurnCoordinator
@@ -77,7 +78,7 @@ class WebServices:
     storage: PrivateFileStorage
     knowledge: ReleaseKnowledgeGateway
     trusted: TrustedSourceClient
-    auth: SupabaseAuthClient
+    auth: OidcAuthClient
     pipeline: AssistantEngine
     coordinator: TurnCoordinator | None = None
 
@@ -89,7 +90,7 @@ class WebServices:
 @dataclass(frozen=True)
 class CurrentUser:
     record: dict[str, Any]
-    identity: SupabaseIdentity
+    identity: UserIdentity
 
     @property
     def id(self) -> str:
@@ -180,7 +181,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.openrouter_api_key,
         enabled=os.getenv("ENABLE_TRUSTED_WEB_SEARCH", "false").lower() == "true",
     )
-    auth = SupabaseAuthClient()
+    auth = OidcAuthClient(
+        web_auth_mode=settings.web_auth_mode,
+        issuer_url=settings.oidc_issuer_url,
+        client_id=settings.oidc_client_id,
+        client_secret=settings.oidc_client_secret,
+        scopes=settings.oidc_scopes,
+        redirect_uri=settings.oidc_redirect_uri,
+        session_max_age_seconds=settings.auth_session_max_age_seconds or 28_800,
+    )
     provider = ProviderClient(api_key=settings.openrouter_api_key)
     retrieval = None
     rag_backend = os.getenv("RAG_BACKEND", "postgres").strip().lower()
@@ -269,16 +278,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=list(WEB_ALLOWED_ORIGINS),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "Idempotency-Key",
-        "X-Request-ID",
-    ],
+    SessionMiddleware,
+    secret_key=APP_SESSION_SECRET or "local-development-session-secret",
+    session_cookie="raise_session",
+    max_age=AUTH_SESSION_MAX_AGE_SECONDS,
+    same_site="lax",
+    https_only=APP_ENV in {"pilot", "production"},
 )
 app.include_router(whatsapp_router)
 
@@ -314,25 +319,27 @@ def _services(request: Request) -> WebServices:
 
 async def current_user(
     request: Request,
-    authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
-    token = ""
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
     services = _services(request)
     try:
-        identity = await services.auth.validate(token)
+        identity = services.auth.identity(request)
+        _require_csrf(request)
         record = await asyncio.to_thread(
-            services.store.upsert_supabase_user,
-            auth_user_id=identity.auth_user_id,
-            email=identity.email,
-            name=identity.name,
-            google_subject=identity.google_subject,
-            is_admin=identity.is_admin,
+            services.store.upsert_user,
+            identity,
         )
-    except SupabaseAuthError as exc:
+    except OidcAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     return CurrentUser(record=record, identity=identity)
+
+
+def _require_csrf(request: Request) -> None:
+    if WEB_AUTH_MODE == "disabled" or request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    expected = str(request.session.get("csrf_token") or "")
+    supplied = request.headers.get("x-csrf-token", "")
+    if not expected or not secrets.compare_digest(expected, supplied):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
 
 
 def _require_consent(services: WebServices, user: CurrentUser) -> None:
@@ -350,6 +357,39 @@ def _sse(event: str, data: dict[str, Any]) -> bytes:
 def _delete_paths(storage: PrivateFileStorage, paths: list[str]) -> None:
     for path in dict.fromkeys(paths):
         storage.delete(path)
+
+
+@app.get("/auth/session")
+async def auth_session(request: Request) -> dict[str, Any]:
+    return _services(request).auth.session_status(request)
+
+
+@app.get("/auth/login")
+async def auth_login(request: Request) -> Response:
+    services = _services(request)
+    if WEB_AUTH_MODE == "disabled":
+        return RedirectResponse(APP_PUBLIC_URL or "/")
+    try:
+        return await services.auth.login(request)
+    except OidcAuthError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request) -> Response:
+    services = _services(request)
+    try:
+        await services.auth.callback(request)
+    except OidcAuthError:
+        target = (AUTH_POST_LOGIN_REDIRECT_URL or APP_PUBLIC_URL or "/").rstrip("/")
+        return RedirectResponse(f"{target}/?auth_error=oauth_failed")
+    return RedirectResponse(AUTH_POST_LOGIN_REDIRECT_URL or APP_PUBLIC_URL or "/")
+
+
+@app.post("/auth/logout", status_code=204)
+async def auth_logout(request: Request) -> None:
+    _require_csrf(request)
+    request.session.clear()
 
 
 @app.get("/healthz")
@@ -395,10 +435,12 @@ async def healthz(request: Request) -> dict[str, Any]:
         result["status"] = "degraded"
         result["fallback_ready"] = False
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6433").rstrip("/")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY", "").strip()
+    qdrant_headers = {"api-key": qdrant_api_key} if qdrant_api_key else {}
     ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     async with httpx.AsyncClient(timeout=2.0) as client:
         qdrant_check, ollama_check = await asyncio.gather(
-            client.get(f"{qdrant_url}/collections"),
+            client.get(f"{qdrant_url}/collections", headers=qdrant_headers),
             client.get(f"{ollama_url}/api/tags"),
             return_exceptions=True,
         )
@@ -938,7 +980,7 @@ async def delete_account(
         await services.pipeline.clarification.delete(user.id, conversation_id)
 
     await asyncio.to_thread(services.store.delete_user_records, user.id)
-    await services.auth.delete_user(user.identity.auth_user_id)
+    request.session.clear()
 
 
 def _streaming_response(stream: AsyncIterator[bytes]) -> StreamingResponse:

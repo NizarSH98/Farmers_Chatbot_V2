@@ -46,12 +46,35 @@ def _common_issues(settings: RuntimeSettings) -> list[str]:
         issues.append("RETENTION_DAYS (1-30)")
     if not settings.database_url.startswith(("postgres://", "postgresql://")):
         issues.append("DATABASE_URL (PostgreSQL)")
-    if not _is_https_url(settings.supabase_url):
-        issues.append("SUPABASE_URL (HTTPS)")
-    if not settings.supabase_service_role_key:
-        issues.append("SUPABASE_SERVICE_ROLE_KEY")
-    if not settings.supabase_storage_bucket:
-        issues.append("SUPABASE_STORAGE_BUCKET")
+    else:
+        database_password = urlparse(settings.database_url).password or ""
+        if database_password in {"", "raise-local-only", "password", "changeme"}:
+            issues.append("DATABASE_URL (strong non-default password)")
+    if (
+        len(settings.qdrant_api_key) < 32
+        or settings.qdrant_api_key
+        in {
+            "raise-change-this-qdrant-key-now",
+            "raise-qdrant-local-only-32-characters",
+        }
+    ):
+        issues.append("QDRANT_API_KEY (strong non-default secret)")
+    if settings.storage_backend not in {"local", "s3"}:
+        issues.append("STORAGE_BACKEND (local or s3)")
+    elif settings.storage_backend == "local":
+        if not settings.local_file_root:
+            issues.append("LOCAL_FILE_ROOT")
+    else:
+        if settings.s3_endpoint_url and not _is_https_url(settings.s3_endpoint_url):
+            issues.append("S3_ENDPOINT_URL (HTTPS)")
+        if not settings.s3_region:
+            issues.append("S3_REGION")
+        if not settings.s3_bucket:
+            issues.append("S3_BUCKET")
+        if not settings.s3_access_key_id:
+            issues.append("S3_ACCESS_KEY_ID")
+        if not settings.s3_secret_access_key:
+            issues.append("S3_SECRET_ACCESS_KEY")
     if not settings.openrouter_api_key:
         issues.append("OPENROUTER_API_KEY")
     if not _is_https_url(settings.openrouter_api_url):
@@ -92,16 +115,46 @@ def _common_issues(settings: RuntimeSettings) -> list[str]:
 def _surface_issues(settings: RuntimeSettings, surface: str) -> list[str]:
     issues: list[str] = []
     if surface == "web":
-        if settings.web_auth_mode != "supabase":
-            issues.append("WEB_AUTH_MODE=supabase")
-        if not settings.supabase_publishable_key:
-            issues.append("SUPABASE_PUBLISHABLE_KEY")
-        if not settings.web_allowed_origins:
-            issues.append("WEB_ALLOWED_ORIGINS")
-        for origin in settings.web_allowed_origins:
-            if origin == "*" or not _is_https_url(origin):
-                issues.append("WEB_ALLOWED_ORIGINS (explicit HTTPS origins only)")
-                break
+        if settings.web_auth_mode != "oidc":
+            issues.append("WEB_AUTH_MODE=oidc")
+        if not _is_https_url(settings.oidc_issuer_url):
+            issues.append("OIDC_ISSUER_URL (HTTPS)")
+        if not settings.oidc_client_id:
+            issues.append("OIDC_CLIENT_ID")
+        if not settings.oidc_client_secret:
+            issues.append("OIDC_CLIENT_SECRET")
+        scopes = set(settings.oidc_scopes.split())
+        if not {"openid", "email"}.issubset(scopes):
+            issues.append("OIDC_SCOPES (must include openid and email)")
+        if not _is_https_url(settings.oidc_redirect_uri):
+            issues.append("OIDC_REDIRECT_URI (HTTPS)")
+        elif (
+            urlparse(settings.oidc_redirect_uri).netloc
+            != urlparse(settings.app_public_url).netloc
+        ):
+            issues.append("OIDC_REDIRECT_URI (must use APP_PUBLIC_URL host)")
+        if not _is_https_url(settings.auth_post_login_redirect_url):
+            issues.append("AUTH_POST_LOGIN_REDIRECT_URL (HTTPS)")
+        if (
+            len(settings.app_session_secret) < 32
+            or settings.app_session_secret == "local-development-session-secret"
+        ):
+            issues.append("APP_SESSION_SECRET (at least 32 characters)")
+        if (
+            settings.auth_session_max_age_seconds is None
+            or not 300 <= settings.auth_session_max_age_seconds <= 86_400
+        ):
+            issues.append("AUTH_SESSION_MAX_AGE_SECONDS (300-86400)")
+        if settings.access_policy not in {
+            "any_verified_email",
+            "email_allowlist",
+            "domain_allowlist",
+        }:
+            issues.append("ACCESS_POLICY")
+        if settings.access_policy == "email_allowlist" and not settings.allowed_emails:
+            issues.append("ALLOWED_EMAILS")
+        if settings.access_policy == "domain_allowlist" and not settings.allowed_domains:
+            issues.append("ALLOWED_DOMAINS")
     else:
         raise ValueError(f"Unknown hosted surface: {surface}")
     return issues

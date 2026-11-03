@@ -2,6 +2,12 @@
 
 Created: 2026-08-20
 
+> **ARCHIVED — superseded 2026-09-01.** This planning document
+> predates the provider-neutral Docker deployment and the authorized fresh
+> user-data reset. Do not use its provider, retention, migration, or operations
+> assumptions as current instructions. Use the active documentation index at
+> `../../README.md` instead.
+
 This plan governs the transition from the compatibility-preserving pilot
 codebase to a single, maintainable local-first stack that deploys unchanged.
 

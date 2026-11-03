@@ -6,16 +6,20 @@ import json
 
 from conftest import new_pilot_store
 
+from farmers_chatbot.auth import UserIdentity
 from scripts.archive_user_data import archive
 
 
 def _seed(store):
-    user = store.upsert_supabase_user(
-        auth_user_id="auth-archive-1",
-        email="farmer@example.org",
-        name="Farmer",
-        google_subject=None,
-        is_admin=False,
+    user = store.upsert_user(
+        UserIdentity(
+            user_id="",
+            issuer="https://identity.example.org",
+            subject="auth-archive-1",
+            email="farmer@example.org",
+            name="Farmer",
+            is_admin=False,
+        )
     )
     conversation_id = store.create_conversation(user["id"], title="Old season")
     store.add_message(

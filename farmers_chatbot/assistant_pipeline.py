@@ -171,6 +171,7 @@ class PreparedTurn:
     effective_text: str
     interaction: dict[str, Any]
     provider_record_start: int = 0
+    turn_tools: ToolRegistry | None = None
 
 
 @dataclass
@@ -295,10 +296,16 @@ class AssistantEngine:
             ),
             project_chunks=tools.project_chunks,
         )
+        if isinstance(tools.knowledge, ReleaseKnowledgeGateway):
+            tools = tools.for_release(
+                bundle.release_id or bundle.retrieval_metrics.get("release_id"),
+                risk=analysis.risk,
+                currentness=analysis.currentness,
+            )
         sources = bundle.knowledge_results
         project_sources = bundle.project_results
         timings["retrieval"] = int((time.perf_counter() - retrieval_started) * 1000)
-        builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
+        builder = AssistantPromptBuilder(tools.knowledge, tools, api_key=self.api_key)
         if bundle.retrieval_metrics.get("backend") == "postgres_hybrid_graph":
             citations = [item.citation() for item in [*bundle.passages, *bundle.claims]]
         else:
@@ -344,6 +351,7 @@ class AssistantEngine:
             effective_text=effective_text,
             interaction={},
             provider_record_start=provider_record_start,
+            turn_tools=tools,
         )
 
     async def stream(
@@ -354,6 +362,7 @@ class AssistantEngine:
         tools: ToolRegistry,
         history: list[dict[str, str]],
     ) -> AsyncIterator[PipelineEvent]:
+        tools = prepared.turn_tools or tools
         started = time.perf_counter()
         analysis = prepared.analysis
         if analysis.needs_clarification and analysis.clarification_question:
@@ -405,7 +414,7 @@ class AssistantEngine:
             yield self._error_result(prepared, started, "invalid_model", str(exc))
             return
 
-        builder = AssistantPromptBuilder(self.knowledge, tools, api_key=self.api_key)
+        builder = AssistantPromptBuilder(tools.knowledge, tools, api_key=self.api_key)
         messages = builder._build_messages(
             query=prepared.effective_text,
             sources=prepared.sources,

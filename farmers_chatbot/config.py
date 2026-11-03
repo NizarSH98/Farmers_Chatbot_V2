@@ -218,16 +218,15 @@ OPENROUTER_DATA_COLLECTION = os.getenv(
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
 APP_DISPLAY_NAME = os.getenv("APP_DISPLAY_NAME", "RAISE").strip()
-AUTH_MODE = os.getenv("AUTH_MODE", "disabled").lower()
 WEB_AUTH_MODE = os.getenv(
     "WEB_AUTH_MODE",
-    "supabase" if APP_ENV in {"pilot", "production"} else "disabled",
+    "oidc" if APP_ENV in {"pilot", "production"} else "disabled",
 ).lower()
-ACCESS_POLICY = os.getenv("ACCESS_POLICY", "google_any").lower()
+ACCESS_POLICY = os.getenv("ACCESS_POLICY", "any_verified_email").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
 ADMIN_EMAILS = _csv_set("ADMIN_EMAILS")
-AGREEMENT_TEXT_VERSION = "project-2026-08-v1"
+AGREEMENT_TEXT_VERSION = "project-2026-09-v2"
 CONSENT_VERSION = os.getenv("CONSENT_VERSION", AGREEMENT_TEXT_VERSION)
 ORGANIZATION_NAME = os.getenv(
     "ORGANIZATION_NAME", "RAISE-ESDU"
@@ -238,22 +237,28 @@ PRIVACY_CONTACT_EMAIL = os.getenv(
 ).strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 LOCAL_FILE_ROOT = Path(os.getenv("LOCAL_FILE_ROOT", "data/pilot_files"))
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_PUBLISHABLE_KEY = os.getenv(
-    "SUPABASE_PUBLISHABLE_KEY",
-    os.getenv("SUPABASE_ANON_KEY", ""),
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").strip().rstrip("/")
+S3_REGION = os.getenv("S3_REGION", "us-east-1").strip()
+S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+S3_ACCESS_KEY_ID = os.getenv("S3_ACCESS_KEY_ID", "").strip()
+S3_SECRET_ACCESS_KEY = os.getenv("S3_SECRET_ACCESS_KEY", "").strip()
+S3_FORCE_PATH_STYLE = (
+    os.getenv("S3_FORCE_PATH_STYLE", "false").strip().lower() == "true"
 )
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "pilot-files")
+OIDC_ISSUER_URL = os.getenv("OIDC_ISSUER_URL", "").strip().rstrip("/")
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "").strip()
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "").strip()
+OIDC_SCOPES = os.getenv("OIDC_SCOPES", "openid email profile").strip()
+OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "").strip()
+AUTH_POST_LOGIN_REDIRECT_URL = os.getenv(
+    "AUTH_POST_LOGIN_REDIRECT_URL", APP_PUBLIC_URL
+).strip().rstrip("/")
+APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
+AUTH_SESSION_MAX_AGE_SECONDS = int(
+    os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800")
+)
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
-WEB_ALLOWED_ORIGINS = tuple(
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "WEB_ALLOWED_ORIGINS",
-        "http://localhost:3000",
-    ).split(",")
-    if origin.strip()
-)
 DATABASE_POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "1"))
 DATABASE_POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
 AUTH_CACHE_SECONDS = int(os.getenv("AUTH_CACHE_SECONDS", "60"))

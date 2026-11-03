@@ -9,6 +9,8 @@ anyio==4.14.2
 attrs==26.1.0
 Authlib==1.7.2
 blinker==1.9.0
+boto3==1.43.85
+botocore==1.43.85
 cachetools==7.1.7
 certifi==2026.7.22
 cffi==2.1.1
@@ -41,7 +43,9 @@ huggingface_hub==1.28.0
 hyperframe==6.1.0
 idna==3.19
 instructor==1.15.4
+itsdangerous==2.2.0
 jiter==0.14.0
+jmespath==1.1.0
 Jinja2==3.1.6
 joblib==1.5.3
 joserfc==1.7.4
@@ -106,6 +110,7 @@ requests==2.34.2
 rich==14.3.4
 requests-toolbelt==1.0.0
 rpds-py==2026.6.3
+s3transfer==0.19.2
 scikit-learn==1.9.0
 scipy==1.18.0
 six==1.17.0

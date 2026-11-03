@@ -68,7 +68,7 @@ def test_export_verify_and_restore_preserves_database_and_private_files(tmp_path
     export_dir = tmp_path / 'export'
     manifest = export_backup(export_dir, store, source_storage)
 
-    assert manifest['database']['engine'] == 'sqlite'
+    assert manifest['database']['engine'] == 'postgresql'
     assert manifest['object_count'] == 2
     assert verify_backup(export_dir) == []
 
@@ -86,7 +86,7 @@ def test_verifier_detects_changed_database_backup(tmp_path):
     storage = LocalPrivateStorage(tmp_path / 'source-files')
     export_dir = tmp_path / 'export'
     export_backup(export_dir, store, storage)
-    database_path = export_dir / 'database.sqlite3'
+    database_path = export_dir / 'database.dump'
     database_path.write_bytes(database_path.read_bytes() + b'changed')
 
     assert 'Database backup size does not match' in ' '.join(

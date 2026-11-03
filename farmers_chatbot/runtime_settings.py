@@ -40,17 +40,28 @@ class RuntimeSettings:
     agreement_text_version: str
     retention_days: int | None
     database_url: str
-    auth_mode: str
+    qdrant_api_key: str
     web_auth_mode: str
     access_policy: str
     allowed_emails: tuple[str, ...]
     allowed_domains: tuple[str, ...]
     admin_emails: tuple[str, ...]
-    supabase_url: str
-    supabase_publishable_key: str
-    supabase_service_role_key: str
-    supabase_storage_bucket: str
-    web_allowed_origins: tuple[str, ...]
+    oidc_issuer_url: str
+    oidc_client_id: str
+    oidc_client_secret: str
+    oidc_scopes: str
+    oidc_redirect_uri: str
+    auth_post_login_redirect_url: str
+    app_session_secret: str
+    auth_session_max_age_seconds: int | None
+    storage_backend: str
+    local_file_root: str
+    s3_endpoint_url: str
+    s3_region: str
+    s3_bucket: str
+    s3_access_key_id: str
+    s3_secret_access_key: str
+    s3_force_path_style: bool
     openrouter_api_key: str
     openrouter_api_url: str
     openrouter_allowed_models: tuple[str, ...]
@@ -89,6 +100,11 @@ class RuntimeSettings:
             retention_days: int | None = int(retention_raw)
         except ValueError:
             retention_days = None
+        session_age_raw = get("AUTH_SESSION_MAX_AGE_SECONDS", "28800")
+        try:
+            session_age: int | None = int(session_age_raw)
+        except ValueError:
+            session_age = None
 
         app_env = get("APP_ENV", "development").lower()
         return cls(
@@ -105,24 +121,33 @@ class RuntimeSettings:
             agreement_text_version=AGREEMENT_TEXT_VERSION,
             retention_days=retention_days,
             database_url=get("DATABASE_URL"),
-            auth_mode=get("AUTH_MODE", "disabled").lower(),
+            qdrant_api_key=get("QDRANT_API_KEY"),
             web_auth_mode=get(
                 "WEB_AUTH_MODE",
-                "supabase" if app_env in HOSTED_ENVIRONMENTS else "disabled",
+                "oidc" if app_env in HOSTED_ENVIRONMENTS else "disabled",
             ).lower(),
-            access_policy=get("ACCESS_POLICY", "google_any").lower(),
+            access_policy=get("ACCESS_POLICY", "any_verified_email").lower(),
             allowed_emails=_csv(get("ALLOWED_EMAILS"), lower=True),
             allowed_domains=_csv(get("ALLOWED_DOMAINS"), lower=True),
             admin_emails=_csv(get("ADMIN_EMAILS"), lower=True),
-            supabase_url=get("SUPABASE_URL").rstrip("/"),
-            supabase_publishable_key=get(
-                "SUPABASE_PUBLISHABLE_KEY", get("SUPABASE_ANON_KEY")
-            ),
-            supabase_service_role_key=get("SUPABASE_SERVICE_ROLE_KEY"),
-            supabase_storage_bucket=get("SUPABASE_STORAGE_BUCKET", "pilot-files"),
-            web_allowed_origins=tuple(
-                origin.rstrip("/") for origin in _csv(get("WEB_ALLOWED_ORIGINS"))
-            ),
+            oidc_issuer_url=get("OIDC_ISSUER_URL").rstrip("/"),
+            oidc_client_id=get("OIDC_CLIENT_ID"),
+            oidc_client_secret=get("OIDC_CLIENT_SECRET"),
+            oidc_scopes=get("OIDC_SCOPES", "openid email profile"),
+            oidc_redirect_uri=get("OIDC_REDIRECT_URI"),
+            auth_post_login_redirect_url=get(
+                "AUTH_POST_LOGIN_REDIRECT_URL", get("APP_PUBLIC_URL")
+            ).rstrip("/"),
+            app_session_secret=get("APP_SESSION_SECRET"),
+            auth_session_max_age_seconds=session_age,
+            storage_backend=get("STORAGE_BACKEND", "local").lower(),
+            local_file_root=get("LOCAL_FILE_ROOT", "data/pilot_files"),
+            s3_endpoint_url=get("S3_ENDPOINT_URL").rstrip("/"),
+            s3_region=get("S3_REGION", "us-east-1"),
+            s3_bucket=get("S3_BUCKET"),
+            s3_access_key_id=get("S3_ACCESS_KEY_ID"),
+            s3_secret_access_key=get("S3_SECRET_ACCESS_KEY"),
+            s3_force_path_style=_boolean(get("S3_FORCE_PATH_STYLE")),
             openrouter_api_key=get("OPENROUTER_API_KEY"),
             openrouter_api_url=get(
                 "OPENROUTER_API_URL",

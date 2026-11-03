@@ -1,0 +1,16 @@
+# Non-root PostgreSQL/restic image for encrypted backup and restore verification.
+FROM pgvector/pgvector:pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates restic \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=755 deploy/backup/backup.sh /usr/local/bin/raise-backup
+COPY --chmod=755 deploy/backup/restore.sh /usr/local/bin/raise-restore
+RUN mkdir -p /work /restic-cache /private-files \
+    && chown -R postgres:postgres /work /restic-cache /private-files
+
+USER postgres
+ENV RESTIC_CACHE_DIR=/restic-cache
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/raise-backup"]

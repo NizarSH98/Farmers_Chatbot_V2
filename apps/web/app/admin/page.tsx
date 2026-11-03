@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { supabaseBrowser } from "@/lib/supabase";
+import { loadAuthSession } from "@/lib/auth";
 
 const LOCAL_AUTH = process.env.NEXT_PUBLIC_LOCAL_AUTH === "true";
 
@@ -29,11 +29,12 @@ type Proposal = {
 
 async function authToken(): Promise<string> {
   if (LOCAL_AUTH) return "local-development";
-  const { data } = await supabaseBrowser().auth.getSession();
-  if (!data.session?.access_token) throw new Error("Administrator sign-in is required.");
-  return data.session.access_token;
+  const session = await loadAuthSession();
+  if (!session?.csrf_token) throw new Error("Administrator sign-in is required.");
+  return session.csrf_token;
 }
 
+/** Knowledge release, graph inspection, and editor-review administration. */
 export default function KnowledgeAdminPage() {
   const [releases, setReleases] = useState<Release[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);

@@ -1,11 +1,5 @@
 import type { NextConfig } from "next";
 
-const connectSources = [
-  "'self'",
-  process.env.NEXT_PUBLIC_API_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_URL
-].filter(Boolean).join(" ");
-
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -28,11 +22,11 @@ const nextConfig: NextConfig = {
             "script-src 'self' 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
-            "connect-src " + connectSources,
+            "connect-src 'self'",
             "font-src 'self' data:",
             "frame-ancestors 'none'",
             "base-uri 'self'",
-            "form-action 'self' https://accounts.google.com"
+            "form-action 'self'"
           ].join("; ")
         }
       ]

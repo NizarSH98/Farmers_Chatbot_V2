@@ -1,8 +1,8 @@
 import type { StreamEvent, TurnPayload, TurnStatusResponse } from "./types";
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
-  .replace(/\/$/, "");
+const API_URL = "/api";
 
+/** Stable browser API error retaining HTTP status and backend detail. */
 export class ApiError extends Error {
   status: number;
 
@@ -30,13 +30,14 @@ export async function apiFetch<T>(
   init: RequestInit = {}
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", "Bearer " + token);
+  if (token) headers.set("X-CSRF-Token", token);
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(API_URL + path, {
     ...init,
     headers,
+    credentials: "include",
     cache: "no-store"
   });
   if (!response.ok) {
@@ -73,7 +74,8 @@ export async function downloadPrivateFile(
   filename: string
 ): Promise<void> {
   const response = await fetch(API_URL + path, {
-    headers: { Authorization: "Bearer " + token },
+    headers: token ? { "X-CSRF-Token": token } : undefined,
+    credentials: "include",
     cache: "no-store"
   });
   if (!response.ok) throw new ApiError(response.status, response.statusText);
@@ -106,12 +108,13 @@ export async function* streamTurn(
   const response = await fetch(API_URL + "/v1/turns", {
     method: "POST",
     headers: {
-      Authorization: "Bearer " + token,
+      "X-CSRF-Token": token,
       "Content-Type": "application/json",
       "Idempotency-Key": requestId,
       "X-Request-ID": requestId
     },
     body: JSON.stringify(payload),
+    credentials: "include",
     cache: "no-store",
     signal
   });

@@ -22,7 +22,11 @@ def main() -> None:
     parser.add_argument("--arabic", type=Path, default=Path("knowledge_base/agrifood_knowledge_v0.3.ar.md"))
     parser.add_argument("--disposition", type=Path, default=Path("knowledge_base/agrifood_knowledge_v0.3.disposition.json"))
     parser.add_argument("--source-doc", type=Path, default=Path("knowledge_base/ESDU_Agrifood_Knowledge_Base_v0.1.docx"))
-    parser.add_argument("--translation-report", type=Path, default=Path("build-reports/translation-validation.v0.3.json"))
+    parser.add_argument(
+        "--translation-report",
+        type=Path,
+        default=Path("knowledge_base/translation-validation.v0.3.json"),
+    )
     parser.add_argument("--embedding-model", default=os.getenv("RAG_LOCAL_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"))
     parser.add_argument("--embedding-dimensions", type=int, default=int(os.getenv("RAG_LOCAL_EMBEDDING_DIMENSIONS", "384")))
     parser.add_argument("--deployment-scope", choices=("internal", "pilot"), default="pilot")

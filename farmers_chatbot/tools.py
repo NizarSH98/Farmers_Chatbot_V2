@@ -59,6 +59,19 @@ class ToolRegistry:
                 }
             )
 
+    def for_release(
+        self, release_id: str | None, *, risk: str = "medium",
+        currentness: str = "stable",
+    ) -> ToolRegistry:
+        """Give each turn independent tool accounting and a fixed knowledge view."""
+        return ToolRegistry(
+            self.knowledge.for_release(release_id, risk=risk, currentness=currentness),
+            self.evidence_store,
+            project_chunks=self.project_chunks,
+            trusted_client=self.trusted_client,
+            artifact_service=self.artifact_service,
+        )
+
     def model_definitions(self) -> list[dict[str, Any]]:
         """Return only tools safe for autonomous model requests."""
 
@@ -68,7 +81,7 @@ class ToolRegistry:
                 "function": {
                     "name": "search_knowledge",
                     "description": (
-                        "Search the approved/draft bilingual RAISE knowledge base. "
+                        "Search the eligible reviewed bilingual RAISE knowledge release. "
                         "Use first for Lebanon and Akkar agricultural questions."
                     ),
                     "parameters": {

@@ -146,9 +146,10 @@ Client-supplied model IDs always go through `resolve_model_id()` against
 
 ### Frontend
 
-Next.js App Router + React 19 + Supabase. `lib/api.ts` wraps the backend with
-SSE streaming; `components/ChatWorkspace.tsx` is the main UI and is the largest
-maintenance hotspot in the repo.
+Next.js App Router + React 19. The browser uses the same-origin `/api` proxy;
+`lib/api.ts` wraps the backend with SSE streaming and CSRF/session handling.
+`components/ChatWorkspace.tsx` is the main UI and its largest maintenance
+hotspot.
 
 ## Working agreements
 
@@ -159,17 +160,18 @@ maintenance hotspot in the repo.
 - **Test database-dependent code against the database.** Doubles are fine for
   logic; anything whose job is talking to PostgreSQL uses the real test
   database. A gateway verified against a fake shipped two live bugs.
-- **Backward compatibility is not a constraint.** v2 keeps accounts registered
-  and archives prior workspace content (`scripts/archive_user_data.py`); it does
-  not migrate it. Changing the data lifecycle also needs new bilingual legal
-  text and a `CONSENT_VERSION` bump, because `hosted_runtime` refuses to start
-  unless consent matches the deployed text.
+- **Fresh user/workspace baseline.** The 2026-09 reform intentionally does not
+  migrate legacy user data. Future lifecycle changes still need matching
+  bilingual legal text and a `CONSENT_VERSION` bump, because
+  `hosted_runtime` refuses mismatched consent configuration.
 - Active work happens on `master` and short-lived branches from it.
 
 ## Current state
 
-See `docs/CLEANUP_PLAN_2026-08.md` for the v2 cleanup, the standing decisions,
-and what each stage delivered.
+The authorized 2026-09 deployment is a fresh user/workspace baseline; no legacy
+user data is migrated. See `docs/README.md` for authoritative documents,
+`docs/product/PRODUCT_EXPERIENCE_SPEC.md` for the next frontend/backend work,
+and `docs/MIGRATION_REPORT.md` for the completed infrastructure reform.
 
 The graph is well formed (mean degree 3.8, 5% orphans, 33 relation types in use,
 no ambiguous aliases) and its path retrieval is real — a shuffled-path negative

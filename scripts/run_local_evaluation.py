@@ -85,21 +85,6 @@ async def _run_case(
         reverse=True,
     )
     evidence_ids = list(dict.fromkeys(item.evidence_id for item in evidence_items))
-    expected = {
-        evidence_id
-        for claim in case.claims
-        for evidence_id in claim.expected_evidence_ids
-    }
-    citations = [
-        {
-            "claim_id": claim.claim_id,
-            "evidence_id": evidence_id,
-            "entails": True,
-        }
-        for claim in case.claims
-        for evidence_id in claim.expected_evidence_ids
-        if evidence_id in evidence_ids
-    ]
     candidate_paths = [
         list(path)
         for path in dict.fromkeys(
@@ -111,20 +96,17 @@ async def _run_case(
             for item in bundle.graph_paths
         )
     ]
-    paths = candidate_paths[: len(case.expected_graph_paths)]
-    retrieved_expected = expected.intersection(evidence_ids)
-    quality = len(retrieved_expected) / len(expected) if expected else 1.0
     return {
         "schema_version": "raise.eval.run.v1",
         "case_id": case.case_id,
         "system_id": "qdrant_lazy_graphrag_retrieval",
         "retrieved_evidence_ids": evidence_ids,
-        "graph_paths": paths,
-        "citations": citations,
+        "graph_paths": candidate_paths,
+        "citations": [],
         "escalated": False,
         "critical_violation": False,
         "unsafe_actions": [],
-        "quality_score": quality,
+        "quality_score": None,
         "success": bundle.retrieval_metrics.get("backend") == "qdrant_lazy_graphrag",
         "cost_usd": 0.0,
         "ttft_ms": None,
@@ -163,10 +145,18 @@ async def run(cases: tuple[EvaluationCase, ...], output: Path, concurrency: int)
     report = EvaluationHarness(cases, top_k=10).score(
         parsed, "qdrant_lazy_graphrag_retrieval"
     )
+    # Retrieval cannot judge generated answers, entailment, or safety. Keep the
+    # generic run schema, but do not publish its default values as measurements.
+    for metric in ("quality", "citations", "safety"):
+        report["metrics"].pop(metric, None)
+    report["retrieval_by_language"] = retrieval_by_language(cases, report)
     report["scope"] = {
         "kind": "retrieval_only",
         "does_not_measure": [
             "answer_generation",
+            "answer_quality",
+            "citation_entailment",
+            "safety",
             "verifier_enforcement",
             "human_preference",
             "frontier_model_comparison",
@@ -180,6 +170,27 @@ async def run(cases: tuple[EvaluationCase, ...], output: Path, concurrency: int)
     return report
 
 
+def retrieval_by_language(
+    cases: tuple[EvaluationCase, ...], report: dict[str, Any]
+) -> dict[str, float | None]:
+    groups: dict[str, list[float]] = {}
+    cases_by_id = {case.case_id: case for case in cases}
+    for result in report["cases"]:
+        recall = result["retrieval_recall_at_k"]
+        if recall is not None:
+            group = cases_by_id[result["case_id"]].language_group
+            groups.setdefault(group, []).append(float(recall))
+    means = {group: sum(values) / len(values) for group, values in groups.items()}
+    arabic, english = means.get("arabic"), means.get("english")
+    return {
+        **means,
+        "arabic_deficit_points": (
+            None if arabic is None or english is None
+            else max(0.0, english - arabic) * 100
+        ),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", choices=("public", "hidden"), default="public")
@@ -188,7 +199,7 @@ def main() -> int:
         type=float,
         default=2.0,
         help=(
-            "fail when Arabic trails English by more than this many points. "
+            "fail when Arabic retrieval recall trails English by more than this many points. "
             "RAISE is Arabic-first, so an English-first workflow must not be "
             "allowed to become English-only."
         ),
@@ -211,7 +222,10 @@ def main() -> int:
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"cases": len(cases), "runs": str(output), "report": str(report_path), "metrics": report.get("metrics")}, ensure_ascii=False, sort_keys=True))
 
-    gap = report["metrics"]["quality"].get("arabic_english_gap_points")
+    if report["metrics"]["efficiency"]["success_rate"] != 1.0:
+        print("Retrieval evaluation failed: one or more cases used an unavailable backend.", file=sys.stderr)
+        return 1
+    gap = report["retrieval_by_language"]["arabic_deficit_points"]
     if gap is not None and gap > args.max_language_gap_points:
         print(
             f"language gap {gap:.3f} points exceeds the "

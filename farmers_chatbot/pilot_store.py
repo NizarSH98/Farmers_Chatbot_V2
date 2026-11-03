@@ -1,4 +1,4 @@
-"""Persistent pilot workspace store with SQLite and PostgreSQL backends."""
+"""PostgreSQL workspace, ownership, quota, turn, and feedback persistence."""
 
 from __future__ import annotations
 
@@ -168,96 +168,6 @@ class PilotStore:
                     ),
                 )
         return self.get_user(user_id)
-
-    def upsert_supabase_user(
-        self,
-        *,
-        auth_user_id: str,
-        email: str,
-        name: str,
-        google_subject: str | None,
-        is_admin: bool,
-    ) -> dict[str, Any]:
-        """Link a verified Supabase identity without using email as a key."""
-
-        auth_user_id = auth_user_id.strip()
-        if not auth_user_id:
-            raise ValueError("Supabase identity is missing its subject")
-        now = utc_now()
-        role = "admin" if is_admin else "user"
-        with self._connect() as connection:
-            row = connection.execute(
-                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
-                (auth_user_id,),
-            ).fetchone()
-            if not row and google_subject:
-                row = connection.execute(
-                    self._sql(
-                        """
-                        SELECT * FROM users
-                        WHERE issuer IN ('accounts.google.com',
-                                         'https://accounts.google.com')
-                          AND subject = ?
-                        """
-                    ),
-                    (google_subject,),
-                ).fetchone()
-            if row:
-                connection.execute(
-                    self._sql(
-                        """
-                        UPDATE users
-                        SET auth_user_id = ?, email = ?, name = ?, role = ?,
-                            last_seen_at = ?
-                        WHERE id = ?
-                        """
-                    ),
-                    (
-                        auth_user_id,
-                        email or None,
-                        name[:200],
-                        role,
-                        now,
-                        row["id"],
-                    ),
-                )
-                user_id = str(row["id"])
-            else:
-                user_id = str(uuid.uuid4())
-                issuer = "https://accounts.google.com" if google_subject else "supabase"
-                subject = google_subject or auth_user_id
-                connection.execute(
-                    self._sql(
-                        """
-                        INSERT INTO users
-                            (id, issuer, subject, auth_user_id, email, name, role,
-                             created_at, last_seen_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """
-                    ),
-                    (
-                        user_id,
-                        issuer,
-                        subject,
-                        auth_user_id,
-                        email or None,
-                        name[:200],
-                        role,
-                        now,
-                        now,
-                    ),
-                )
-        return self.get_user(user_id)
-
-    def get_user_by_auth_id(self, auth_user_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                self._sql("SELECT * FROM users WHERE auth_user_id = ?"),
-                (auth_user_id,),
-            ).fetchone()
-        if not row:
-            raise ValueError("User not found")
-        return dict(row)
 
     def upsert_whatsapp_user(self, identity_hash: str) -> dict[str, Any]:
         identity = UserIdentity(

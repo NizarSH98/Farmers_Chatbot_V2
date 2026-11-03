@@ -25,7 +25,7 @@ def _identity(subject: str, email: str) -> UserIdentity:
     )
 
 
-def test_verified_google_identity_and_authorization_policies(monkeypatch):
+def test_verified_oidc_identity_and_authorization_policies(monkeypatch):
     claims = {
         "iss": "https://accounts.google.com",
         "sub": "google-subject",
@@ -33,21 +33,33 @@ def test_verified_google_identity_and_authorization_policies(monkeypatch):
         "email_verified": True,
         "name": "Tester",
     }
-    monkeypatch.setattr(auth, "ACCESS_POLICY", "google_any")
-    identity = auth.identity_from_claims(claims)
+    monkeypatch.setattr(auth, "ACCESS_POLICY", "any_verified_email")
+    identity = auth.identity_from_claims(
+        claims,
+        expected_issuer="https://accounts.google.com",
+    )
     assert identity.subject == "google-subject"
     assert identity.email == "tester@example.org"
 
     with pytest.raises(IdentityError):
-        auth.identity_from_claims({**claims, "email_verified": False})
+        auth.identity_from_claims(
+            {**claims, "email_verified": False},
+            expected_issuer="https://accounts.google.com",
+        )
 
     with pytest.raises(IdentityError, match="session expired"):
-        auth.identity_from_claims({**claims, "exp": int(time.time()) - 60})
+        auth.identity_from_claims(
+            {**claims, "exp": int(time.time()) - 60},
+            expected_issuer="https://accounts.google.com",
+        )
 
     monkeypatch.setattr(auth, "ACCESS_POLICY", "domain_allowlist")
     monkeypatch.setattr(auth, "ALLOWED_DOMAINS", frozenset({"aub.edu.lb"}))
     with pytest.raises(IdentityError):
-        auth.identity_from_claims(claims)
+        auth.identity_from_claims(
+            claims,
+            expected_issuer="https://accounts.google.com",
+        )
 
 
 def test_workspace_ownership_isolation_and_attachment_cleanup(tmp_path):

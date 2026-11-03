@@ -326,8 +326,8 @@ svg {
   border-radius: 11px;
   display: inline-flex;
   justify-content: center;
-  min-height: 42px;
-  min-width: 42px;
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .icon-button:hover,
@@ -450,6 +450,7 @@ svg {
   border: 0;
   flex: 1;
   min-width: 0;
+  min-height: 44px;
   overflow: hidden;
   padding: 9px 10px;
   text-align: start;
@@ -466,10 +467,10 @@ svg {
   align-items: center;
   border-radius: 8px;
   display: flex;
-  height: 34px;
+  height: 44px;
   justify-content: center;
   list-style: none;
-  width: 34px;
+  width: 44px;
 }
 
 .row-menu summary::-webkit-details-marker {
@@ -501,6 +502,7 @@ svg {
   border-radius: 8px;
   display: flex;
   gap: 9px;
+  min-height: 44px;
   padding: 8px 10px;
   text-align: start;
   width: 100%;
@@ -867,7 +869,8 @@ svg {
   display: flex;
   font-size: 12px;
   gap: 5px;
-  min-height: 34px;
+  min-height: 44px;
+  min-width: 44px;
   padding: 5px 7px;
 }
 
@@ -1031,9 +1034,9 @@ svg {
   border-radius: 11px;
   color: white;
   display: flex;
-  height: 40px;
+  height: 44px;
   justify-content: center;
-  width: 40px;
+  width: 44px;
 }
 
 .stop-button {
@@ -1901,10 +1904,12 @@ svg {
   border-radius: 50%;
   color: white;
   display: inline-flex;
-  flex: 0 0 24px;
+  flex: 0 0 auto;
   font-size: 12px;
   height: 24px;
   justify-content: center;
+  min-width: 46px;
+  padding-inline: 6px;
 }
 
 .clarification-options {
@@ -1957,6 +1962,17 @@ svg {
 .clarification-submit svg {
   height: 17px;
   width: 17px;
+}
+
+.clarification-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.clarification-navigation .clarification-submit {
+  margin-inline-start: auto;
 }
 
 
@@ -2041,6 +2057,7 @@ svg {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 44px;
   gap: 0.5rem;
   width: 100%;
   padding: 0.35rem 0.15rem;
