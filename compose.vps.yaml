@@ -1,0 +1,27 @@
+# Single-VPS overlay: Caddy terminates HTTPS (automatic Let's Encrypt) and routes
+# only to web:3000. PostgreSQL, Qdrant, and the API stay on internal networks.
+#
+# Never combine with compose.override.yaml (local-only: auth disabled, dev env).
+# deploy/vps/make-env.sh writes COMPOSE_FILE=compose.yaml:compose.vps.yaml into
+# .env, so a bare `docker compose ...` on the VPS uses exactly these two files.
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN must be set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL must be set in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - raise-caddy-data:/data
+      - raise-caddy-config:/config
+    restart: unless-stopped
+    networks:
+      - edge
+
+volumes:
+  raise-caddy-data:
+  raise-caddy-config:
