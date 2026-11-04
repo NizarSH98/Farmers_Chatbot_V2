@@ -118,3 +118,40 @@ python scripts/evaluate_system.py score `
 The example output only proves that the evaluator works. Release thresholds and
 comparative claims are evaluated later on the approved hidden dataset with
 pre-registered acceptance gates.
+
+## Retrieval datasets and graph decisions
+
+`run_local_evaluation --split <name>` (`raise.ps1 evaluate -Split <name>` locally)
+scores retrieval only, against the active release:
+
+| Split | File | What it measures |
+| --- | --- | --- |
+| `public` | `evaluation/golden/public_dev.v1.jsonl` | 240 source-anchored paraphrases, one passage each. Gated on the Arabic deficit (default 2 points). |
+| `multihop` | `evaluation/golden/multihop_dev.v1.jsonl` | 60 cases from two-hop chains A–B–C whose hops are evidenced in different documents. Prompts name only A and C, never the bridge entity or a predicate. Built by `scripts/build_multihop_evaluation.py`; `multihop_manifest.v1.json` records the release, rules, and hash. |
+
+The multi-hop set is a generated candidate and still needs agronomist review
+before it can support product claims. Regenerate it whenever the release
+changes.
+
+Results on `release_4debc9a9` (2026-11), recall@10 / MRR:
+
+| Retrieval | multihop | public |
+| --- | --- | --- |
+| Text fusion only (baseline) | 0.167 / 0.100 | 0.994 / 0.971 |
+| + graph→passage channel on the lazy-graph route (adopted) | 0.825 / 0.583 | 0.990 / 0.890 |
+
+Decisions recorded with that evidence:
+
+- **Adopted.** Passages behind the top graph paths join reciprocal-rank fusion
+  on the lazy-graph route (`GRAPH_CHANNEL_*` in `qdrant_retrieval.py`). The
+  multi-hop Arabic deficit fell from 31 to 5.6 points; it remains above the
+  2-point gate, so `--split multihop` still exits non-zero.
+- **Rejected for now: down-weighting generic predicates.** Multi-hop MRR rose
+  0.574 → 0.613, but the Arabic deficit rose 5.6 → 10.0 points.
+- **Rejected for now: excluding generic predicates.** Multi-hop recall fell
+  0.825 → 0.742. About 36% of relations use `supports_action`,
+  `requires_context`, or `related_to`, so intent-typed traversal waits for the
+  ontology to replace them with specific predicates.
+- **Deferred: geography filtering.** Every relation currently carries
+  `["Akkar", "rural Lebanon"]`, so a filter would change nothing until
+  relations are tagged with finer areas.

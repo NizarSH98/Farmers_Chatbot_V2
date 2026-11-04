@@ -180,11 +180,12 @@ and `docs/MIGRATION_REPORT.md` for the completed infrastructure reform.
 
 The graph is well formed (mean degree 3.8, 5% orphans, 33 relation types in use,
 no ambiguous aliases) and its path retrieval is real — a shuffled-path negative
-control collapses accuracy from 0.891 to 0.018. But it adds no measurable
-evidence-retrieval benefit on the current 240-case set, because dense and sparse
-fusion alone already reaches 99.4% recall@10. There is no headroom, so the
-evaluation cannot yet demonstrate the graph's value either way. Answer-level
-safety, citation entailment, and frontier comparisons remain unmeasured.
+control collapses accuracy from 0.891 to 0.018. The 240-case source-anchored set
+cannot show graph value (fusion alone reaches 99.4% recall@10). The cross-document
+`multihop` split can: fusion alone reaches 0.167 recall@10, and adding the
+graph→passage channel reaches 0.825 (see `docs/EVALUATION_HARNESS.md`).
+Answer-level safety, citation entailment, and frontier comparisons remain
+unmeasured.
 
 `RAISE_Logframe_final.xlsx`, `.env`, and the source DOCX must never be
 committed; `scripts/release_preflight.py` and the CI `security` job check.
