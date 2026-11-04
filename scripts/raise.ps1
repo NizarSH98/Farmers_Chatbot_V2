@@ -5,6 +5,9 @@ param(
     [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build-graph', 'evaluate', 'ablate', 'graph-profile', 'snapshot', 'export', 'restore', 'smoke', 'archive')]
     [string]$Command = 'status',
     [string]$Path = '',
+    # evaluate: public (gated golden set) or multihop (cross-document chains)
+    [ValidateSet('public', 'multihop')]
+    [string]$Split = 'public',
     [switch]$Rebuild
 )
 
@@ -87,7 +90,7 @@ switch ($Command) {
     'status' { Invoke-Compose ps }
     'logs' { Invoke-Compose logs --tail 200 api web postgres qdrant }
     'build-graph' { Invoke-ContainerPython -Module 'scripts.build_graph_release' -Arguments @('--activate') }
-    'evaluate' { Invoke-ContainerPython -Module 'scripts.run_local_evaluation' -Arguments @('--split', 'public') }
+    'evaluate' { Invoke-ContainerPython -Module 'scripts.run_local_evaluation' -Arguments @('--split', $Split) }
     'ablate' { Invoke-ContainerPython -Module 'scripts.run_ablations' }
     'graph-profile' { Invoke-ContainerPython -Module 'scripts.profile_graph' }
     'snapshot' { New-ReleaseSnapshot }

@@ -1,0 +1,25 @@
+{
+  "schema_version": "raise.eval.multihop-builder.v1",
+  "release_id": "release_4debc9a9de849675835bb255",
+  "cases": 60,
+  "candidate_chains": 518,
+  "cases_sha256": "8e3729c7cc8ddf8ba1b1f9ae0ab1c002f8c428b7af29f9cffe975e0c0f97d7cb",
+  "languages": {
+    "en": 15,
+    "msa": 15,
+    "leb": 15,
+    "arabizi": 15
+  },
+  "review_status": "generated_candidate_needs_agronomist_review",
+  "rules": {
+    "hops": 2,
+    "hop_evidence": "disjoint documents",
+    "prompt_names": "endpoints only (no bridge entity, no predicate)",
+    "excluded_predicates": [
+      "has_unit",
+      "related_to",
+      "requires_live_source"
+    ],
+    "max_bridge_degree": 15
+  }
+}
