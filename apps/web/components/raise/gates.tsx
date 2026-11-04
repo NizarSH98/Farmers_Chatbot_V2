@@ -5,7 +5,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { useAppState } from "./app-state";
 import { BrandMark } from "./brand";
@@ -76,18 +75,25 @@ export function SignInScreen() {
 export function ConsentScreen() {
   const { text, agreement, acceptAgreement, signOut, error } = useAppState();
   return (
-    <main className="bg-background relative flex min-h-svh items-center justify-center px-4 py-12">
+    <main className="bg-background relative flex min-h-svh items-center justify-center px-4 pt-16 pb-6 sm:py-12">
       <LanguageToggle />
-      <div className="bg-card border-border animate-in fade-in slide-in-from-bottom-2 flex max-h-[85svh] w-full max-w-2xl flex-col rounded-3xl border shadow-sm duration-500">
+      <div className="bg-card border-border animate-in fade-in slide-in-from-bottom-2 flex max-h-[calc(100svh-6rem)] w-full max-w-2xl flex-col sm:max-h-[85svh] rounded-3xl border shadow-sm duration-500">
         <div className="flex items-center gap-3 border-b px-6 py-5">
           <BrandMark size="sm" />
           <h1 className="text-lg font-semibold">{text("agreementTitle")}</h1>
         </div>
-        <ScrollArea className="min-h-0 flex-1 px-6">
+        {/* Native scrolling: the agreement must stay inside the card so the
+            accept button is always visible and clickable. */}
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label={text("agreementTitle")}
+          className="focus-visible:ring-ring/50 min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 outline-none focus-visible:ring-2 focus-visible:ring-inset"
+        >
           <div className="prose-raise text-foreground/90 py-5 text-sm leading-relaxed [&_h1]:mb-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:font-semibold [&_li]:ms-5 [&_li]:list-disc [&_p]:mb-3">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{agreement}</ReactMarkdown>
           </div>
-        </ScrollArea>
+        </div>
         {error && <p className="text-destructive px-6 pb-2 text-sm">{error}</p>}
         <div className="flex flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-end">
           <Button variant="ghost" onClick={() => void signOut()}>
