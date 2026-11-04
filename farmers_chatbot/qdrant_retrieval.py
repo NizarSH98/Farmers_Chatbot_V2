@@ -69,6 +69,9 @@ class QdrantGraphRetrieval(RetrievalService):
     async def close(self) -> None:
         await self.client.close()
 
+    async def warm_up(self) -> float | None:
+        return await asyncio.to_thread(self.embeddings.warm_up)
+
     @staticmethod
     def route(request: RetrievalRequest) -> RetrievalRoute:
         override = request.route_override

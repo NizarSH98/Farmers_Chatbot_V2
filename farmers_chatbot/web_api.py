@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -160,6 +161,26 @@ class FeedbackRequest(BaseModel):
     language: str | None = None
 
 
+logger = logging.getLogger("raise.web_api")
+
+
+async def _warm_retrieval(app: FastAPI, retrieval: Any) -> None:
+    """Load embedding models in the background so the first farmer after a
+    restart does not wait for them. Best effort: a failure only means the first
+    query loads them instead."""
+
+    app.state.retrieval_warm_seconds = None
+    if retrieval is None or os.getenv("RAG_WARM_UP", "true").strip().lower() == "false":
+        return
+    try:
+        seconds = await retrieval.warm_up()
+    except Exception as exc:  # warm-up must never stop the API
+        logger.warning("Retrieval warm-up failed; the first query will load models: %s", exc)
+        return
+    if seconds is not None:
+        app.state.retrieval_warm_seconds = round(seconds, 2)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = validate_web_runtime()
@@ -262,9 +283,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.services = services
     await asyncio.to_thread(purge_expired_content, store, RETENTION_DAYS, storage)
+    warm_up = asyncio.create_task(_warm_retrieval(app, retrieval))
     try:
         yield
     finally:
+        warm_up.cancel()
         await pipeline.close()
         await auth.close()
         store.close()
@@ -408,6 +431,7 @@ async def healthz(request: Request) -> dict[str, Any]:
         "qdrant_reachable": False,
         "fallback_ready": True,
         "local_model_available": False,
+        "retrieval_warm_seconds": getattr(request.app.state, "retrieval_warm_seconds", None),
     }
     try:
         with services.store._connect() as connection:
