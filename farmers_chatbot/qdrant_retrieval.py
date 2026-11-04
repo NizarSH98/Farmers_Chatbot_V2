@@ -34,6 +34,22 @@ RetrievalRoute = Literal["vector", "contextual", "lazy_graph"]
 _ROUTES = frozenset({"vector", "contextual", "lazy_graph"})
 
 
+# Graph -> passage channel (HippoRAG-style): passages that evidence the top
+# graph paths join the evidence fusion as one more ranked channel, so a second
+# hop's passage can reach the model even when it shares no words with the
+# question. Tuned on release_4debc9a9 against both evaluation sets (2026-11):
+#   multi-hop recall@10 0.167 -> 0.825; source-anchored set 0.994 -> 0.990.
+# Below weight 1.0 graph passages never enter the top 10 (RRF scores are
+# tightly packed); a rank offset trades multi-hop recall for top-1 order on
+# single-passage questions, and recall is what the generator needs. The
+# contextual (one-hop) route stays text-only: adding the channel there cost
+# single-passage ranking without a multi-hop gain.
+GRAPH_PASSAGE_LIMIT = 8
+GRAPH_CHANNEL_WEIGHT = 1.0
+GRAPH_CHANNEL_RANK_OFFSET = 0
+GRAPH_CHANNEL_ROUTES: frozenset[str] = frozenset({"lazy_graph"})
+
+
 class QdrantGraphRetrieval(RetrievalService):
     """Dense/BM25 Qdrant fusion plus bounded evidence-backed graph expansion.
 
@@ -163,10 +179,22 @@ class QdrantGraphRetrieval(RetrievalService):
                     queries=tuple(dict.fromkeys((*request.queries, *alias_variants))),
                     language="ar",
                 )
-            passages, claims = await self._query_evidence(
-                effective_request, release_id, projection, route
+            scores, points = await self._evidence_candidates(
+                effective_request, release_id, projection
             )
             paths = await self._query_graph(effective_request, release_id, projection, route)
+            if route in GRAPH_CHANNEL_ROUTES:
+                graph_passages = await self._graph_passage_points(
+                    effective_request, release_id, projection, paths
+                )
+                self._fuse_channel(
+                    scores,
+                    points,
+                    graph_passages,
+                    GRAPH_CHANNEL_WEIGHT,
+                    GRAPH_CHANNEL_RANK_OFFSET,
+                )
+            passages, claims = self._select_evidence(effective_request, scores, points)
             project_results = await self._project_results(
                 effective_request, project_chunks=project_chunks
             )
@@ -344,13 +372,14 @@ class QdrantGraphRetrieval(RetrievalService):
         )
         return list(points)
 
-    async def _query_evidence(
+    async def _evidence_candidates(
         self,
         request: RetrievalRequest,
         release_id: str,
         projection: dict[str, Any],
-        route: RetrievalRoute,
-    ) -> tuple[list[EvidenceItem], list[EvidenceItem]]:
+    ) -> tuple[dict[str, float], dict[str, Any]]:
+        """Dense + BM25 runs per query variant, fused by reciprocal rank."""
+
         queries = tuple(dict.fromkeys((request.query, *request.queries)))[:4]
         if self._likely_arabizi(request):
             queries = (request.query,)
@@ -391,6 +420,29 @@ class QdrantGraphRetrieval(RetrievalService):
             point_id = str(point.id)
             scores[point_id] = scores.get(point_id, 0.0) + 1.0 / (10 + rank)
             points.setdefault(point_id, point)
+        return scores, points
+
+    @staticmethod
+    def _fuse_channel(
+        scores: dict[str, float],
+        points: dict[str, Any],
+        ranked: Sequence[Any],
+        weight: float = 1.0,
+        rank_offset: int = 0,
+    ) -> None:
+        """Add one weighted ranked channel to the reciprocal-rank fusion in place."""
+
+        for rank, point in enumerate(ranked, start=1 + rank_offset):
+            point_id = str(point.id)
+            scores[point_id] = scores.get(point_id, 0.0) + weight / (60 + rank)
+            points.setdefault(point_id, point)
+
+    def _select_evidence(
+        self,
+        request: RetrievalRequest,
+        scores: dict[str, float],
+        points: dict[str, Any],
+    ) -> tuple[list[EvidenceItem], list[EvidenceItem]]:
         ordered = sorted(points.values(), key=lambda point: scores[str(point.id)], reverse=True)
         selected = self._diversify(ordered, request.top_k)
         passages: list[EvidenceItem] = []
@@ -474,6 +526,52 @@ class QdrantGraphRetrieval(RetrievalService):
             paths = self._personalized_pagerank(paths, entity_ids)
         paths = self._rank_graph_paths(paths, direct_entity_ids, request.query)
         return paths[: min(30, max(request.top_k * 3, request.top_k))]
+
+    async def _graph_passage_points(
+        self,
+        request: RetrievalRequest,
+        release_id: str,
+        projection: dict[str, Any],
+        paths: Sequence[dict[str, Any]],
+    ) -> list[Any]:
+        """Passages that evidence the top-ranked graph paths, in path order.
+
+        A path found through the graph is only useful to the answer when the
+        passage behind it reaches the model: this is how a second hop's
+        evidence enters even when it shares no words with the question.
+        """
+
+        passage_ids: list[str] = []
+        for path in paths:
+            for passage_id in path.get("passage_ids") or []:
+                if passage_id and passage_id not in passage_ids:
+                    passage_ids.append(str(passage_id))
+            if len(passage_ids) >= GRAPH_PASSAGE_LIMIT:
+                break
+        passage_ids = passage_ids[:GRAPH_PASSAGE_LIMIT]
+        if not passage_ids:
+            return []
+        records, _ = await self.client.scroll(
+            collection_name=str(projection["evidence_collection"]),
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(key="release_id", match=models.MatchValue(value=release_id)),
+                    models.FieldCondition(key="record_type", match=models.MatchValue(value="chunk")),
+                    models.FieldCondition(key="record_id", match=models.MatchAny(any=passage_ids)),
+                    models.FieldCondition(
+                        key="review_status", match=models.MatchAny(any=self._statuses(request))
+                    ),
+                ]
+            ),
+            limit=len(passage_ids) * 2,
+            with_payload=True,
+            with_vectors=False,
+        )
+        order = {passage_id: index for index, passage_id in enumerate(passage_ids)}
+        return sorted(
+            (record for record in records if str((record.payload or {}).get("record_id")) in order),
+            key=lambda record: order[str((record.payload or {}).get("record_id"))],
+        )
 
     @staticmethod
     def _rank_graph_paths(
