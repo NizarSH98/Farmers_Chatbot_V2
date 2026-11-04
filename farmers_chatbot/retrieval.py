@@ -95,6 +95,14 @@ class RetrievalService:
     ) -> EvidenceBundle:
         raise NotImplementedError
 
+    async def warm_up(self) -> float | None:
+        """Load expensive local resources ahead of the first query.
+
+        Returns the seconds spent, or None when there is nothing to warm.
+        """
+
+        return None
+
 
 class ProjectOnlyFallbackRetrieval(RetrievalService):
     """Terminal fallback: tenant project documents only, never reviewed claims.

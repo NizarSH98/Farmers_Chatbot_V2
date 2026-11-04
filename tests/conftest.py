@@ -173,3 +173,9 @@ def pilot_store():
         yield store
     finally:
         store.close()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # The API would otherwise load local embedding models in a background
+    # thread whenever a developer's .env selects the Qdrant backend.
+    os.environ.setdefault("RAG_WARM_UP", "false")

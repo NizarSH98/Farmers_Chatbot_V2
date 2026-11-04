@@ -44,13 +44,22 @@ class _UnavailableFallback(RetrievalService):
         )
 
 
+# public: source-anchored golden set (gated). hidden: out-of-repo acceptance.
+# multihop: cross-document chains that only joined evidence can answer.
+SPLITS: dict[str, Path] = {
+    "public": Path("evaluation/golden/public_dev.v1.jsonl"),
+    "hidden": Path("evaluation/hidden/acceptance.v1.jsonl"),
+    "multihop": Path("evaluation/golden/multihop_dev.v1.jsonl"),
+}
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _mode(case: EvaluationCase) -> tuple[str, int]:
     tags = set(case.tags)
-    if "multi_hop_graph" in tags:
+    if tags & {"multi_hop_graph", "multi_hop_cross_document"}:
         return "deep", 2
     if tags & {"actionable_decision", "troubleshooting", "safety_currentness"}:
         return "standard", 1
@@ -193,7 +202,7 @@ def retrieval_by_language(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--split", choices=("public", "hidden"), default="public")
+    parser.add_argument("--split", choices=tuple(SPLITS), default="public")
     parser.add_argument(
         "--max-language-gap-points",
         type=float,
@@ -208,7 +217,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    cases_path = Path("evaluation/golden/public_dev.v1.jsonl") if args.split == "public" else Path("evaluation/hidden/acceptance.v1.jsonl")
+    cases_path = SPLITS[args.split]
     output = args.output or Path(f"build-reports/evaluation/qdrant_{args.split}.v1.jsonl")
     report_path = args.report or Path(f"build-reports/evaluation/qdrant_{args.split}.report.v1.json")
     cases = load_cases(cases_path)

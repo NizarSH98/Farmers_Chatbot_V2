@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import re
+import threading
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -136,10 +138,27 @@ class LocalEmbeddingService:
         self.config = config
         self._dense: TextEmbedding | None = None
         self._sparse: dict[str, SparseTextEmbedding] = {}
+        # Loading an ONNX model takes seconds and hundreds of MB; a startup
+        # warm-up racing the first query must not load it twice.
+        self._load_lock = threading.Lock()
+
+    def warm_up(self) -> float:
+        """Load the dense model and both BM25 encoders; return seconds taken."""
+
+        started = time.perf_counter()
+        self.dense(["warm-up"], query=True)
+        self.sparse(["warm-up", "تهيئة"], ["english", "arabic"])
+        return time.perf_counter() - started
 
     def _dense_model(self) -> TextEmbedding:
         if self._dense is not None:
             return self._dense
+        with self._load_lock:
+            if self._dense is None:
+                self._dense = self._load_dense_model()
+            return self._dense
+
+    def _load_dense_model(self) -> TextEmbedding:
         custom = _CUSTOM_E5.get(self.config.embedding_model)
         if custom:
             dimensions, size_gb = custom
@@ -172,18 +191,21 @@ class LocalEmbeddingService:
         probe = next(iter(model.embed(["query: RAISE model dimension probe"])))
         if len(probe) != self.config.embedding_dimensions:
             raise ProjectionError("local embedding output dimension mismatch")
-        self._dense = model
         return model
 
     def _sparse_model(self, language: str) -> SparseTextEmbedding:
         key = "arabic" if language.lower().startswith("ar") else "english"
-        if key not in self._sparse:
-            self._sparse[key] = SparseTextEmbedding(
-                "Qdrant/bm25",
-                cache_dir=self.config.cache_dir,
-                language=key,
-            )
-        return self._sparse[key]
+        model = self._sparse.get(key)
+        if model is not None:
+            return model
+        with self._load_lock:
+            if key not in self._sparse:
+                self._sparse[key] = SparseTextEmbedding(
+                    "Qdrant/bm25",
+                    cache_dir=self.config.cache_dir,
+                    language=key,
+                )
+            return self._sparse[key]
 
     @staticmethod
     def _e5_prefix(text: str, *, query: bool, model: str) -> str:
