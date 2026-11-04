@@ -85,7 +85,7 @@ function ConversationRow({
         }}
         className="h-9"
       >
-        <span className="truncate">{conversation.title}</span>
+        <span dir="auto" className="w-full truncate text-start">{conversation.title}</span>
       </SidebarMenuButton>
       <DropdownMenu>
         <DropdownMenuTrigger
