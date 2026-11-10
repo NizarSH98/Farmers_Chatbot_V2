@@ -24,6 +24,7 @@ export interface CurrentUser {
   name: string;
   email: string;
   role: string;
+  participant_code?: string | null;
   consent_current: boolean;
   default_mode: string;
 }

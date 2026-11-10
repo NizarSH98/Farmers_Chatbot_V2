@@ -19,8 +19,9 @@ def _hosted_environment(**overrides: str) -> dict[str, str]:
         "APP_DISPLAY_NAME": "RAISE",
         "ORGANIZATION_NAME": "RAISE-ESDU",
         "PRIVACY_CONTACT_EMAIL": "privacy@example.org",
-        "CONSENT_VERSION": "project-2026-09-v2",
+        "CONSENT_VERSION": "project-2026-11-v3",
         "RETENTION_DAYS": "30",
+        "RESEARCH_RETENTION_DAYS": "365",
         "DATABASE_URL": "postgresql://user:secret@db.example.org/raise",
         "QDRANT_API_KEY": "a-strong-random-qdrant-key-over-32-characters",
         "STORAGE_BACKEND": "local",
@@ -105,6 +106,21 @@ def test_hosted_web_rejects_insecure_oidc_redirects() -> None:
 def test_hosted_web_rejects_missing_qdrant_secret() -> None:
     settings = _settings(_hosted_environment(QDRANT_API_KEY=""))
     with pytest.raises(RuntimeError, match="QDRANT_API_KEY"):
+        validate_web_runtime(settings=settings, check_database_revision=False)
+
+
+@pytest.mark.parametrize("research_days", ["7", "731", "not-a-number"])
+def test_hosted_web_rejects_out_of_range_research_retention(research_days) -> None:
+    settings = _settings(
+        _hosted_environment(RESEARCH_RETENTION_DAYS=research_days)
+    )
+    with pytest.raises(RuntimeError, match="RESEARCH_RETENTION_DAYS"):
+        validate_web_runtime(settings=settings, check_database_revision=False)
+
+
+def test_hosted_web_rejects_stale_consent_version() -> None:
+    settings = _settings(_hosted_environment(CONSENT_VERSION="project-2026-09-v2"))
+    with pytest.raises(RuntimeError, match="CONSENT_VERSION"):
         validate_web_runtime(settings=settings, check_database_revision=False)
 
 

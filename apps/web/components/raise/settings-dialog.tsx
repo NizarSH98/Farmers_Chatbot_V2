@@ -178,6 +178,17 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
           <Separator />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">{text("account")}</span>
+            {app.profile?.participant_code && (
+              <div className="bg-muted/60 flex flex-col gap-1 rounded-lg px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground text-xs">{text("participantCode")}</span>
+                  <code dir="ltr" className="font-mono text-sm font-semibold tracking-wide select-all">
+                    {app.profile.participant_code}
+                  </code>
+                </div>
+                <p className="text-muted-foreground text-xs leading-relaxed">{text("participantCodeHint")}</p>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => void exportData()}>
                 <DownloadIcon />

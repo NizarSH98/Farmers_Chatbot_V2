@@ -7,6 +7,7 @@ Recommended fields:
 | Field | Purpose |
 |---|---|
 | stakeholder_id | Project pseudonym, unique and stable |
+| participant_code | The `RAISE-XXXXXX` code shown in the app under Settings → Account; links tracker rows to the research dataset (see [DATA_RETENTION_AND_RESEARCH.md](DATA_RETENTION_AND_RESEARCH.md)) |
 | consent_status/date/version | Evidence of informed participation |
 | stakeholder_category | Farmer, cooperative, extension, supplier, processor, institution, other |
 | geography | Approved locality granularity |

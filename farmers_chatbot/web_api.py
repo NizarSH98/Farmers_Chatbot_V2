@@ -48,6 +48,7 @@ from .config import (
     MODE_PROFILES,
     MODEL_CATALOG,
     OPENROUTER_ALLOWED_MODELS,
+    RESEARCH_RETENTION_DAYS,
     RETENTION_DAYS,
     WEB_AUTH_MODE,
 )
@@ -181,6 +182,33 @@ async def _warm_retrieval(app: FastAPI, retrieval: Any) -> None:
         app.state.retrieval_warm_seconds = round(seconds, 2)
 
 
+RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def _apply_retention(store: PilotStore, storage: Any) -> None:
+    purge_expired_content(
+        store,
+        RETENTION_DAYS,
+        storage,
+        research_retention_days=RESEARCH_RETENTION_DAYS,
+    )
+
+
+async def _retention_loop(store: PilotStore, storage: Any) -> None:
+    """Re-apply retention daily; a long-running API must not stop deleting.
+
+    Startup applies it once and fails closed. Later runs log and retry the next
+    day, because a transient storage error must not take the service down.
+    """
+
+    while True:
+        await asyncio.sleep(RETENTION_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(_apply_retention, store, storage)
+        except Exception as exc:
+            logger.error("Scheduled retention run failed; retrying tomorrow: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = validate_web_runtime()
@@ -282,11 +310,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store, storage, knowledge, trusted, auth, pipeline, TurnCoordinator(store)
     )
     app.state.services = services
-    await asyncio.to_thread(purge_expired_content, store, RETENTION_DAYS, storage)
+    await asyncio.to_thread(_apply_retention, store, storage)
+    retention = asyncio.create_task(_retention_loop(store, storage))
     warm_up = asyncio.create_task(_warm_retrieval(app, retrieval))
     try:
         yield
     finally:
+        retention.cancel()
         warm_up.cancel()
         await pipeline.close()
         await auth.close()
@@ -519,6 +549,7 @@ async def me(
         "name": user.record["name"],
         "email": user.record.get("email"),
         "role": user.record["role"],
+        "participant_code": user.record.get("participant_code"),
         "consent_current": await asyncio.to_thread(
             services.store.has_current_consent, user.id
         ),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import secrets
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -25,6 +26,8 @@ from .config import (
     MAX_USER_WEEKLY_COST_USD,
     PILOT_COOLDOWN_SECONDS,
 )
+
+PARTICIPANT_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 
 def utc_now() -> str:
@@ -147,13 +150,14 @@ class PilotStore:
                 user_id = str(row["id"])
             else:
                 user_id = str(uuid.uuid4())
+                participant_code = self._unused_participant_code(connection)
                 connection.execute(
                     self._sql(
                         """
                         INSERT INTO users
                             (id, issuer, subject, email, name, role,
-                             created_at, last_seen_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             participant_code, created_at, last_seen_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """
                     ),
                     (
@@ -163,11 +167,32 @@ class PilotStore:
                         identity.email or None,
                         identity.name,
                         role,
+                        participant_code,
                         now,
                         now,
                     ),
                 )
         return self.get_user(user_id)
+
+    def _unused_participant_code(self, connection: Any) -> str:
+        """Return a fresh pseudonymous code such as ``RAISE-7K3QX9``.
+
+        The alphabet drops 0/O and 1/I/L so a code read aloud or copied by hand
+        in the field is not misrecorded. 31^6 codes make a clash rare; the
+        unique index is the final guard.
+        """
+
+        for _ in range(20):
+            code = "RAISE-" + "".join(
+                secrets.choice(PARTICIPANT_CODE_ALPHABET) for _ in range(6)
+            )
+            taken = connection.execute(
+                self._sql("SELECT 1 FROM users WHERE participant_code = ?"),
+                (code,),
+            ).fetchone()
+            if not taken:
+                return code
+        raise RuntimeError("Could not allocate a unique participant code")
 
     def upsert_whatsapp_user(self, identity_hash: str) -> dict[str, Any]:
         identity = UserIdentity(

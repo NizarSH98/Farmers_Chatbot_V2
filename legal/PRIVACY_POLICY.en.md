@@ -32,6 +32,10 @@ Depending on the features you use, the service may process:
   verified email address, display name, role, agreement version, acceptance time,
   preferences, account creation, and last activity time. We do not receive or
   store your Google password.
+- **Participant code:** a random project code, such as `RAISE-7K3QX9`, created
+  with your account and shown in Settings. It contains no personal information.
+  It lets the project team refer to your records without using your email or
+  phone number.
 - **Workspace content:** projects, instructions, conversations, questions,
   answers, uploaded documents, images, extracted text, generated artifacts, and
   source or tool records.
@@ -142,12 +146,32 @@ when a provider offers zero-retention controls.
 
 ## 9. Retention and deletion
 
-The configured identifiable-content retention period is up to
-**{{RETENTION_DAYS}} days**. Conversations, files, artifacts, and inactive account
-records are deleted or de-identified according to the active schedule. Users may
-delete individual content or their account earlier. Query events may remain only
-after the user link is removed, and genuinely anonymous aggregate metrics may be
-retained for project evaluation and accountability.
+Two retention periods apply. The deletion job runs automatically every day.
+
+**Files and contact details: up to {{RETENTION_DAYS}} days.** Uploaded
+documents, images, and generated files are deleted {{RETENTION_DAYS}} days after
+they are added. When an account has not been used for {{RETENTION_DAYS}} days,
+its email address and display name are removed. The account then keeps only its
+participant code. If you sign in again, your email and name are restored and
+your history remains available to you.
+
+**Pilot interaction record: up to {{RESEARCH_RETENTION_DAYS}} days.** Your
+questions, the answers, how each question was classified (for example its topic
+and risk level), response times, and your feedback are kept for up to
+{{RESEARCH_RETENTION_DAYS}} days. The RAISE pilot evaluation needs them to
+measure usefulness, accuracy, safety, and adoption over the whole field-testing
+period. This record is linked to your participant code. Analysis datasets
+contain the participant code only, never your email, name, or phone number. Only
+the project team can link a code to a person, using a separate, access-controlled
+participant record that is not stored in this application. When the period ends,
+conversations and messages are deleted, and usage and feedback records lose their
+link to you and remain only as anonymous aggregate statistics.
+
+You may delete individual conversations at any time. Deleting your account
+removes your conversations, files, feedback, and participant-code link
+immediately, including from future research datasets. Records already shared
+in an earlier dataset carry only the participant code; contact
+{{PRIVACY_CONTACT}} to ask for them to be withdrawn.
 
 Provider backups, fraud-prevention records, OAuth grants, delivery records, and
 security logs may expire later under documented provider schedules. Before each
@@ -176,6 +200,8 @@ Subject to applicable law and verified identity, you may request to:
 - access and export active workspace records;
 - correct inaccurate account or project information;
 - delete conversations, files, artifacts, or the account;
+- ask which records are linked to your participant code, or ask for them to be
+  removed from the research record;
 - withdraw consent or object to a use where applicable;
 - ask how information was used, shared, retained, or sourced; and
 - raise a complaint with the responsible institution or competent authority.
@@ -188,11 +214,18 @@ accountability.
 
 ## 12. Evaluation, research, and publication
 
-Anonymous aggregate measures may be used to evaluate performance, accessibility,
-knowledge gaps, safety, adoption, and project obligations. Identifiable research,
-recording, quotation, publication, model training, or reuse outside normal service
-operation requires a separate protocol, appropriate ethics or institutional
-approval, and additional consent when required. Declining optional research use
+Using the service during the RAISE pilot includes contributing to its
+evaluation. The pseudonymous interaction record described in section 9 is
+analysed by the project team to evaluate performance, accessibility, knowledge
+gaps, safety, adoption, and project obligations. It is used to improve the
+service and to write project reports. Reports present aggregate results.
+Short quotations of questions or feedback may appear only without the
+participant code or any detail that could identify you.
+
+Identifiable research, recording, attributed quotation, publication of
+individual records, model training, or reuse outside the RAISE project requires
+a separate protocol, appropriate ethics or institutional approval, and
+additional consent when required. Declining optional research use
 must not remove access to ordinary service functions unless participation itself
 is the approved research activity and this is explained in advance.
 

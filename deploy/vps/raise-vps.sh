@@ -61,10 +61,24 @@ case "${1:-help}" in
     grep -E '^(API|WEB|BACKUP)_IMAGE=' .env
     echo "Now run: bash deploy/vps/raise-vps.sh up"
     ;;
+  research-export)
+    # Pseudonymous pilot interaction dataset (participant codes only), copied
+    # to ./pilot_exports/research-<stamp>. Download it with scp, then delete it
+    # from the server.
+    stamp="$(date -u +%Y%m%d-%H%M%S)"
+    inside="/tmp/raise-research-${stamp}"
+    "${COMPOSE[@]}" exec -T --workdir /app api python -m scripts.export_research_dataset --output "$inside"
+    mkdir -p pilot_exports
+    chmod 700 pilot_exports
+    api="$("${COMPOSE[@]}" ps -q api)"
+    docker cp "${api}:${inside}" "pilot_exports/research-${stamp}"
+    "${COMPOSE[@]}" exec -T api rm -rf "$inside"
+    echo "pilot_exports/research-${stamp}"
+    ;;
   stop)
     "${COMPOSE[@]}" stop
     ;;
   *)
-    echo "commands: up | bootstrap | status | logs [service] | update | pin <sha> | stop"
+    echo "commands: up | bootstrap | status | logs [service] | update | pin <sha> | research-export | stop"
     ;;
 esac

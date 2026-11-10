@@ -194,7 +194,7 @@ bash deploy/vps/raise-vps.sh status
 ```
 
 `status` must show every service `healthy`, and `/api/healthz` must show
-`"status":"ok"`, migration `20260901_0007`, a non-null `active_release_id`, and
+`"status":"ok"`, migration `20261110_0008`, a non-null `active_release_id`, and
 `qdrant_reachable: true`.
 
 7.9 **Manual acceptance** (from a phone and a laptop):
@@ -243,6 +243,7 @@ configuration problem appears as one line, `Unsafe pilot web configuration:
 | Pin an exact release | `bash deploy/vps/raise-vps.sh pin <40-char-sha> && bash deploy/vps/raise-vps.sh up` |
 | Roll back | `pin` the previous SHA, then `up` (only if no incompatible migration; see `DEPLOYMENT.md` §11) |
 | Rebuild knowledge | `bash deploy/vps/raise-vps.sh bootstrap` |
+| Export the pilot research dataset | `bash deploy/vps/raise-vps.sh research-export`, then `scp` the folder it prints and delete it from the server ([details](DATA_RETENTION_AND_RESEARCH.md)) |
 | Stop (keeps data) | `bash deploy/vps/raise-vps.sh stop` |
 
 `.env` sets `COMPOSE_FILE=compose.yaml:compose.vps.yaml`, so a bare
