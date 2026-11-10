@@ -137,6 +137,13 @@ serves tenant project documents but never reviewed claims.
 Alembic. It refuses any non-PostgreSQL URL. Quota, telemetry, and feedback live
 here too; the separate `EvidenceStore` SQLite database was removed.
 
+Retention has two windows (`retention.py`, run at startup and daily):
+`RETENTION_DAYS` (≤30 hosted) deletes files and strips email/name from inactive
+accounts; `RESEARCH_RETENTION_DAYS` (default 365) keeps the pseudonymous
+interaction record keyed by `users.participant_code` for the pilot evaluation.
+Any change to what is kept or for how long must match the bilingual legal text
+and bump `CONSENT_VERSION`. See `docs/DATA_RETENTION_AND_RESEARCH.md`.
+
 ### Config
 
 `farmers_chatbot/config.py` centralises environment settings; see `.env.example`.

@@ -39,6 +39,7 @@ When documents conflict, use this order:
 | [Internal knowledge intake](ESDU_INTERNAL_KNOWLEDGE_INTAKE.md) | Intake process for ESDU knowledge and performance evidence |
 | [Logframe traceability](LOGFRAME_TRACEABILITY.md) | Mapping from contractual activities to repository evidence |
 | [Policy approval checklist](POLICY_APPROVAL_CHECKLIST.md) | Required institutional, legal, privacy, and launch approvals |
+| [Data retention and research record](DATA_RETENTION_AND_RESEARCH.md) | What is kept and for how long, participant codes, and the pilot dataset export |
 | [Replication readiness output](RRO.md) | Working draft for the future approved replication deliverable |
 
 ## Working templates

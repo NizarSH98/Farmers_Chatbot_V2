@@ -70,6 +70,7 @@ loopback-only ports.
 | MIGRATE/CHECK | `docker compose -f compose.yaml -f compose.override.yaml run --rm migrate python -m alembic current --check` |
 | BOOTSTRAP | `.\scripts\raise.ps1 build-graph` |
 | SMOKE TEST | `.\scripts\raise.ps1 smoke` |
+| RESEARCH EXPORT | `.\scripts\raise.ps1 research-export` (writes to git-ignored `pilot_exports/`) |
 | BACKUP STATUS | `docker compose -f compose.yaml -f compose.override.yaml --profile backup ps` |
 | BACKUP LOGS | `docker compose -f compose.yaml -f compose.override.yaml --profile backup logs --tail 100 backup` |
 | TEST RESTORE | `docker compose -f compose.yaml -f compose.override.yaml --profile backup run --rm --entrypoint /usr/local/bin/raise-restore backup latest` |
@@ -162,7 +163,10 @@ Start from `.env.example`. Required production values:
 
 - `APP_ENV=pilot` or `production`
 - `APP_PUBLIC_URL=https://raise.example.org`
-- real display, organization, privacy-contact, consent, and retention values
+- real display, organization, privacy-contact, and consent values
+- `RETENTION_DAYS` (1–30: files and inactive-account contact details) and
+  `RESEARCH_RETENTION_DAYS` (30–730, default 365: the pseudonymous interaction
+  record); see [DATA_RETENTION_AND_RESEARCH.md](DATA_RETENTION_AND_RESEARCH.md)
 - `FORWARDED_ALLOW_IPS`: only trusted reverse-proxy addresses; never `*`
 
 ### Authentication
@@ -333,7 +337,7 @@ free -h
 curl --fail https://raise.example.org/api/healthz
 ```
 
-Health should show `status=ok`, migration `20260901_0007`, an active release
+Health should show `status=ok`, migration `20261110_0008`, an active release
 after bootstrap, Qdrant reachable, and fallback ready. Monitor:
 
 - HTTPS availability and latency;
