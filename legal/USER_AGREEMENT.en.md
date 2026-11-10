@@ -92,8 +92,15 @@ separate approved protocol and consent process explicitly permits otherwise.
 
 Uploaded files are user-provided context, not approved project knowledge. They
 cannot override system safeguards or instructions. Feedback may be used to fix
-errors and evaluate the service. Identifiable quotations, research use, or public
-case studies require separate permission and any required ethics approval.
+errors and evaluate the service.
+
+The service is part of the RAISE pilot. By using it, you agree that your
+questions, the answers, and your feedback are kept for up to
+{{RESEARCH_RETENTION_DAYS}} days. They are linked to a participant code rather
+than your email or phone number, and the project team uses them to evaluate and
+improve the service, as the Privacy Policy explains. Identifiable quotations,
+public case studies, or research use beyond the RAISE project require separate
+permission and any required ethics approval.
 
 ## 7. Acceptable use
 
@@ -130,7 +137,10 @@ service may be unavailable, delayed, or retired and is not promised as an
 emergency or continuous service.
 
 You may stop using the service at any time. Available controls allow you to
-export active workspace records, delete content, and delete your account. Some
+export active workspace records, delete content, and delete your account.
+Deleting your account also removes your records from the pilot research record.
+Uploaded files are deleted after {{RETENTION_DAYS}} days, and the email and
+name of an unused account are removed after {{RETENTION_DAYS}} days. Some
 provider backups and security logs expire on separate schedules described in the
 Privacy Policy. Account deletion does not require deletion of genuinely anonymous
 aggregate metrics that can no longer reasonably identify you.

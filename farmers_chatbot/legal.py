@@ -9,6 +9,7 @@ from .config import (
     CONSENT_VERSION,
     ORGANIZATION_NAME,
     PRIVACY_CONTACT_EMAIL,
+    RESEARCH_RETENTION_DAYS,
     RETENTION_DAYS,
 )
 
@@ -23,6 +24,7 @@ def _render_template(filename: str) -> str:
         '{{OPERATOR}}': ORGANIZATION_NAME,
         '{{PRIVACY_CONTACT}}': PRIVACY_CONTACT_EMAIL,
         '{{RETENTION_DAYS}}': str(RETENTION_DAYS),
+        '{{RESEARCH_RETENTION_DAYS}}': str(RESEARCH_RETENTION_DAYS),
     }
     for marker, value in replacements.items():
         template = template.replace(marker, value)
@@ -60,13 +62,18 @@ def whatsapp_consent_message() -> str:
 
     return (
         f'{APP_DISPLAY_NAME} privacy notice:\n'
-        f'Messages are retained for up to {RETENTION_DAYS} days. Relevant content '
-        'may be sent to configured AI providers. Do not send sensitive or '
-        'confidential information. Verify high-risk advice with a professional.\n'
+        f'Questions and answers are kept for up to {RESEARCH_RETENTION_DAYS} days '
+        'for the RAISE pilot evaluation, linked to a participant code rather than '
+        f'your phone number. Images are deleted after {RETENTION_DAYS} days. '
+        'Relevant content may be sent to configured AI providers. Do not send '
+        'sensitive or confidential information. Verify high-risk advice with a '
+        'professional.\n'
         f'Privacy contact: {PRIVACY_CONTACT_EMAIL}\n\n'
         'Reply AGREE to accept the User Agreement and acknowledge the Privacy '
         'Policy.\n\n'
-        'إشعار الخصوصية: قد نحتفظ بالرسائل ونرسل المحتوى ذا الصلة إلى مزوّدي '
-        'الذكاء الاصطناعي المعتمدين. لا ترسل معلومات حساسة أو سرية. أرسل AGREE '
-        'لقبول اتفاقية الاستخدام والإقرار بسياسة الخصوصية.'
+        f'إشعار الخصوصية: نحتفظ بالأسئلة والأجوبة حتى {RESEARCH_RETENTION_DAYS} '
+        'يوماً لتقييم مشروع RAISE التجريبي، مرتبطة برمز مشارك وليس برقم هاتفك، '
+        f'ونحذف الصور بعد {RETENTION_DAYS} يوماً. قد نرسل المحتوى ذا الصلة إلى '
+        'مزوّدي الذكاء الاصطناعي المعتمدين. لا ترسل معلومات حساسة أو سرية. أرسل '
+        'AGREE لقبول اتفاقية الاستخدام والإقرار بسياسة الخصوصية.'
     )
