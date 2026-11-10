@@ -226,7 +226,7 @@ ACCESS_POLICY = os.getenv("ACCESS_POLICY", "any_verified_email").lower()
 ALLOWED_EMAILS = _csv_set("ALLOWED_EMAILS")
 ALLOWED_DOMAINS = _csv_set("ALLOWED_DOMAINS")
 ADMIN_EMAILS = _csv_set("ADMIN_EMAILS")
-AGREEMENT_TEXT_VERSION = "project-2026-09-v2"
+AGREEMENT_TEXT_VERSION = "project-2026-11-v3"
 CONSENT_VERSION = os.getenv("CONSENT_VERSION", AGREEMENT_TEXT_VERSION)
 ORGANIZATION_NAME = os.getenv(
     "ORGANIZATION_NAME", "RAISE-ESDU"
@@ -258,7 +258,14 @@ APP_SESSION_SECRET = os.getenv("APP_SESSION_SECRET", "").strip()
 AUTH_SESSION_MAX_AGE_SECONDS = int(
     os.getenv("AUTH_SESSION_MAX_AGE_SECONDS", "28800")
 )
+# Two retention windows. RETENTION_DAYS covers what directly identifies a
+# person or is costly to keep: uploaded files, generated artifacts, and the
+# email/name of inactive accounts. RESEARCH_RETENTION_DAYS covers the
+# pseudonymous interaction record (questions, answers, analysis, timings,
+# feedback) that the pilot evaluation needs; it is linked to a participant code,
+# not an email, and is deleted when the window ends.
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
+RESEARCH_RETENTION_DAYS = int(os.getenv("RESEARCH_RETENTION_DAYS", "365"))
 DATABASE_POOL_MIN_SIZE = int(os.getenv("DATABASE_POOL_MIN_SIZE", "1"))
 DATABASE_POOL_MAX_SIZE = int(os.getenv("DATABASE_POOL_MAX_SIZE", "10"))
 AUTH_CACHE_SECONDS = int(os.getenv("AUTH_CACHE_SECONDS", "60"))

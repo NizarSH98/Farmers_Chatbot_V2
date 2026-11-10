@@ -44,6 +44,15 @@ def _common_issues(settings: RuntimeSettings) -> list[str]:
         )
     if settings.retention_days is None or not 1 <= settings.retention_days <= 30:
         issues.append("RETENTION_DAYS (1-30)")
+    if (
+        settings.research_retention_days is None
+        or not 30 <= settings.research_retention_days <= 730
+        or (
+            settings.retention_days is not None
+            and settings.research_retention_days < settings.retention_days
+        )
+    ):
+        issues.append("RESEARCH_RETENTION_DAYS (30-730, not below RETENTION_DAYS)")
     if not settings.database_url.startswith(("postgres://", "postgresql://")):
         issues.append("DATABASE_URL (PostgreSQL)")
     else:

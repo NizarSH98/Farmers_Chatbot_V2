@@ -2,7 +2,7 @@
 # Local Compose operator entry point; stop/restart preserves named volumes.
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build-graph', 'evaluate', 'ablate', 'graph-profile', 'snapshot', 'export', 'restore', 'smoke', 'archive')]
+    [ValidateSet('start', 'stop', 'restart', 'status', 'logs', 'build-graph', 'evaluate', 'ablate', 'graph-profile', 'snapshot', 'export', 'restore', 'smoke', 'archive', 'research-export')]
     [string]$Command = 'status',
     [string]$Path = '',
     # evaluate: public (gated golden set) or multihop (cross-document chains)
@@ -17,6 +17,7 @@ $Compose = Join-Path $ProjectRoot 'compose.yaml'
 $ComposeOverride = Join-Path $ProjectRoot 'compose.override.yaml'
 $ComposeFiles = @('-f', $Compose, '-f', $ComposeOverride)
 $BackupRoot = Join-Path $ProjectRoot 'backups'
+$ResearchExportRoot = Join-Path $ProjectRoot 'pilot_exports'
 
 function Invoke-Compose {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
@@ -62,7 +63,7 @@ function New-ReleaseSnapshot {
     $handoff = [ordered]@{
         schema_version = 'raise.local-handoff.v1'
         created_at = (Get-Date).ToUniversalTime().ToString('o')
-        migration_revision = '20260901_0007'
+        migration_revision = '20261110_0008'
         files = @($files)
     }
     $handoff | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $target 'handoff-manifest.json') -Encoding utf8
@@ -120,6 +121,21 @@ switch ($Command) {
         Invoke-ContainerPython -Module 'scripts.local_smoke_test'
     }
     'smoke' { Invoke-ContainerPython -Module 'scripts.local_smoke_test' }
+    'research-export' {
+        # Pseudonymous interaction dataset (participant codes only) for the
+        # pilot evaluation. pilot_exports/ is git-ignored.
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $containerPath = "/tmp/raise-research-$stamp"
+        Invoke-ContainerPython -Module 'scripts.export_research_dataset' -Arguments @('--output', $containerPath)
+        New-Item -ItemType Directory -Force -Path $ResearchExportRoot | Out-Null
+        $apiContainer = (& docker compose @ComposeFiles ps -q api).Trim()
+        if (-not $apiContainer) { throw 'API container is not running.' }
+        $target = Join-Path $ResearchExportRoot "research-$stamp"
+        & docker cp "${apiContainer}:$containerPath" $target
+        if ($LASTEXITCODE -ne 0) { throw 'Could not copy the research dataset.' }
+        Invoke-Compose 'exec' '-T' 'api' 'rm' '-rf' $containerPath
+        Write-Output $target
+    }
     'archive' {
         if (-not $Path) { throw 'archive requires -Path <output-directory-inside-container>' }
         Invoke-ContainerPython -Module 'scripts.archive_user_data' -Arguments @('--output', $Path)

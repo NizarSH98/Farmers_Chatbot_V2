@@ -39,6 +39,7 @@ class RuntimeSettings:
     consent_version: str
     agreement_text_version: str
     retention_days: int | None
+    research_retention_days: int | None
     database_url: str
     qdrant_api_key: str
     web_auth_mode: str
@@ -100,6 +101,11 @@ class RuntimeSettings:
             retention_days: int | None = int(retention_raw)
         except ValueError:
             retention_days = None
+        research_raw = get("RESEARCH_RETENTION_DAYS", "365")
+        try:
+            research_retention_days: int | None = int(research_raw)
+        except ValueError:
+            research_retention_days = None
         session_age_raw = get("AUTH_SESSION_MAX_AGE_SECONDS", "28800")
         try:
             session_age: int | None = int(session_age_raw)
@@ -120,6 +126,7 @@ class RuntimeSettings:
             consent_version=get("CONSENT_VERSION", AGREEMENT_TEXT_VERSION),
             agreement_text_version=AGREEMENT_TEXT_VERSION,
             retention_days=retention_days,
+            research_retention_days=research_retention_days,
             database_url=get("DATABASE_URL"),
             qdrant_api_key=get("QDRANT_API_KEY"),
             web_auth_mode=get(
